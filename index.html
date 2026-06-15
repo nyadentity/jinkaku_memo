@@ -36,27 +36,83 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const STORAGE_KEY = "jinkaku-sns-v1";
+const STORAGE_KEY = "jinkaku-sns-v1"; // legacy localStorage key (for migration)
 const PALETTE = ["#a89ce0","#8fbce8","#7fd1bf","#f3a8b8","#f5cf8f","#f3b0d4","#8fd6de","#b3d98f","#f5c19a","#cfa8e0"];
-const DEFAULT_STATS_ORDER = ["yearly", "monthly", "members", "timeofday"];
+const DEFAULT_STATS_ORDER = ["yearly", "members", "timeofday"];
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { alters: [], posts: [], statsOrder: DEFAULT_STATS_ORDER };
-    const data = JSON.parse(raw);
-    let statsOrder = Array.isArray(data.statsOrder) ? data.statsOrder.filter(k => DEFAULT_STATS_ORDER.includes(k)) : [];
-    DEFAULT_STATS_ORDER.forEach(k => { if (!statsOrder.includes(k)) statsOrder.push(k); });
-    return { alters: data.alters || [], posts: data.posts || [], statsOrder };
-  } catch {
-    return { alters: [], posts: [], statsOrder: DEFAULT_STATS_ORDER };
-  }
+const IDB_NAME = "jinkaku-sns-db";
+const IDB_STORE = "state";
+const IDB_KEY = "main";
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+          req.result.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
-function saveState(alters, posts, statsOrder) {
+async function idbLoad() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSave(data) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(data, IDB_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function normalizeState(data) {
+  let statsOrder = Array.isArray(data && data.statsOrder) ? data.statsOrder.filter(k => DEFAULT_STATS_ORDER.includes(k)) : [];
+  DEFAULT_STATS_ORDER.forEach(k => { if (!statsOrder.includes(k)) statsOrder.push(k); });
+  return {
+    alters: (data && data.alters) || [],
+    posts: (data && data.posts) || [],
+    statsOrder,
+  };
+}
+
+async function loadInitialState() {
+  // 1. Try IndexedDB first
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ alters, posts, statsOrder }));
+    const idbData = await idbLoad();
+    if (idbData) return normalizeState(idbData);
   } catch {}
+
+  // 2. Migrate from legacy localStorage if present
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const migrated = normalizeState(JSON.parse(raw));
+      try {
+        await idbSave(migrated);
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
+      return migrated;
+    }
+  } catch {}
+
+  // 3. Nothing found
+  return normalizeState(null);
 }
 
 function dateKey(ts) {
@@ -92,13 +148,14 @@ function Avatar({ alter, size = 40 }) {
 }
 
 function App() {
-  const initial = loadState();
-  const [alters, setAlters] = useState(initial.alters);
-  const [posts, setPosts] = useState(initial.posts);
-  const [statsOrder, setStatsOrder] = useState(initial.statsOrder);
-  const [activeAlterId, setActiveAlterId] = useState(initial.alters[0] ? initial.alters[0].id : null);
+  const [alters, setAlters] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [statsOrder, setStatsOrder] = useState(DEFAULT_STATS_ORDER);
+  const [activeAlterId, setActiveAlterId] = useState(null);
+  const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState("");
   const [draftTags, setDraftTags] = useState("");
+  const [draftImage, setDraftImage] = useState(null);
   const [tab, setTab] = useState("timeline"); // timeline | members | data
   const [menuOpen, setMenuOpen] = useState(false);
   const [addForm, setAddForm] = useState({ name: "", emoji: "", color: "#c4b5fd", bio: "" });
@@ -111,6 +168,7 @@ function App() {
   const [editingPostId, setEditingPostId] = useState(null);
   const [editPostDraft, setEditPostDraft] = useState("");
   const [editPostTags, setEditPostTags] = useState("");
+  const [editPostImage, setEditPostImage] = useState(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState(null);
   const [editingReplyKey, setEditingReplyKey] = useState(null); // `${postId}-${replyId}`
   const [editReplyDraft, setEditReplyDraft] = useState("");
@@ -121,6 +179,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState(null);
   const [selectedMember, setSelectedMember] = useState(null);
+  const [imageOnly, setImageOnly] = useState(false);
   const [memberFilterExpanded, setMemberFilterExpanded] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD"
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -128,13 +187,36 @@ function App() {
     return { y: d.getFullYear(), m: d.getMonth() }; // m: 0-11
   });
   const [statsYear, setStatsYear] = useState(() => new Date().getFullYear());
-  const [statsMonth, setStatsMonth] = useState(() => {
-    const d = new Date();
-    return { y: d.getFullYear(), m: d.getMonth() };
-  });
   const [statsMenuOpenKey, setStatsMenuOpenKey] = useState(null);
 
-  useEffect(() => { saveState(alters, posts, statsOrder); }, [alters, posts, statsOrder]);
+  useEffect(() => {
+    let cancelled = false;
+    loadInitialState().then(data => {
+      if (cancelled) return;
+      setAlters(data.alters);
+      setPosts(data.posts);
+      setStatsOrder(data.statsOrder);
+      setActiveAlterId(data.alters[0] ? data.alters[0].id : null);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    idbSave({ alters, posts, statsOrder }).catch(() => {});
+  }, [alters, posts, statsOrder, loaded]);
+
+  if (!loaded) {
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100vh", color: "#00000044", fontSize: 13,
+      }}>
+        読み込み中…
+      </div>
+    );
+  }
 
   const activeAlter = alters.find(a => a.id === activeAlterId) || null;
   const replyAlter = alters.find(a => a.id === replyAlterId) || null;
@@ -146,7 +228,7 @@ function App() {
     allEntries.push({
       id: p.id, kind: "post", postId: p.id, replyId: null,
       alterId: p.alterId, alterName: p.alterName, alterColor: p.alterColor, alterEmoji: p.alterEmoji,
-      content: p.content, tags: p.tags || [], ts: p.ts, bookmarked: !!p.bookmarked,
+      content: p.content, image: p.image || null, tags: p.tags || [], ts: p.ts, bookmarked: !!p.bookmarked,
     });
     (p.replies || []).forEach(r => {
       allEntries.push({
@@ -174,6 +256,7 @@ function App() {
     if (selectedTag && !(e.tags || []).includes(selectedTag)) return false;
     if (selectedMember && e.alterId !== selectedMember) return false;
     if (selectedDate && dateKey(e.ts) !== selectedDate) return false;
+    if (imageOnly && !e.image) return false;
     if (q) {
       const alterName = (alters.find(a => a.id === e.alterId) || { name: e.alterName }).name || "";
       const inContent = (e.content || "").toLowerCase().includes(q) || alterName.toLowerCase().includes(q);
@@ -183,7 +266,7 @@ function App() {
     return true;
   });
 
-  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate);
+  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate || imageOnly);
 
   // Year options for the calendar selector: span post years + current + a small margin
   const nowYear = new Date().getFullYear();
@@ -206,15 +289,6 @@ function App() {
   });
   const maxMonthlyCount = Math.max(1, ...monthlyCounts);
   const yearTotal = monthlyCounts.reduce((a, b) => a + b, 0);
-
-  const daysInStatsMonth = new Date(statsMonth.y, statsMonth.m + 1, 0).getDate();
-  const dailyCounts = Array.from({ length: daysInStatsMonth }, () => 0);
-  allEntries.forEach(e => {
-    const d = new Date(e.ts);
-    if (d.getFullYear() === statsMonth.y && d.getMonth() === statsMonth.m) dailyCounts[d.getDate() - 1]++;
-  });
-  const maxDailyCount = Math.max(1, ...dailyCounts);
-  const monthTotal = dailyCounts.reduce((a, b) => a + b, 0);
 
   // --- Member breakdown ---
   const memberCounts = alters.map(a => ({
@@ -241,7 +315,7 @@ function App() {
 
 
   function post() {
-    if (!draft.trim() || !activeAlter) return;
+    if ((!draft.trim() && !draftImage) || !activeAlter) return;
     const tags = draftTags.split(/[,\s、]+/).map(t => t.trim()).filter(Boolean);
     const newPost = {
       id: Date.now().toString(),
@@ -250,6 +324,7 @@ function App() {
       alterColor: activeAlter.color,
       alterEmoji: activeAlter.emoji,
       content: draft.trim(),
+      image: draftImage || null,
       tags,
       ts: Date.now(),
       replies: [],
@@ -257,6 +332,32 @@ function App() {
     setPosts(prev => [newPost, ...prev]);
     setDraft("");
     setDraftTags("");
+    setDraftImage(null);
+  }
+
+  function handleImageFile(file, setter) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        // Downscale large images while keeping quality high (avoid visible artifacts)
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        setter(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
   }
 
   function moveAlter(alterId, dir) {
@@ -303,6 +404,7 @@ function App() {
     setEditingPostId(p.id);
     setEditPostDraft(p.content);
     setEditPostTags((p.tags || []).join(" "));
+    setEditPostImage(p.image || null);
     setReplyingTo(null);
     setPostMenuOpenId(null);
   }
@@ -311,12 +413,13 @@ function App() {
     setEditingPostId(null);
     setEditPostDraft("");
     setEditPostTags("");
+    setEditPostImage(null);
   }
 
   function saveEditPost() {
-    if (!editPostDraft.trim()) return;
+    if (!editPostDraft.trim() && !editPostImage) return;
     const tags = editPostTags.split(/[,\s、]+/).map(t => t.trim()).filter(Boolean);
-    setPosts(prev => prev.map(p => p.id === editingPostId ? { ...p, content: editPostDraft.trim(), tags } : p));
+    setPosts(prev => prev.map(p => p.id === editingPostId ? { ...p, content: editPostDraft.trim(), tags, image: editPostImage || null } : p));
     cancelEditPost();
   }
 
@@ -634,13 +737,33 @@ function App() {
               fontFamily: "inherit", boxSizing: "border-box",
             }}
           />
-          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 8, gap: 10 }}>
-            {draft.length > 0 && <span style={{ fontSize: 12, color: "#00000044" }}>{draft.length}文字</span>}
-            <button onClick={post} disabled={!draft.trim()} style={{
+          {draftImage && (
+            <div style={{ position: "relative", marginTop: 8, marginBottom: 4 }}>
+              <img src={draftImage} alt="" style={{ maxWidth: "100%", maxHeight: 240, borderRadius: 12, display: "block" }} />
+              <button onClick={() => setDraftImage(null)} style={{
+                position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%",
+                border: "none", background: "#00000099", color: "#fff", fontSize: 16, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>×</button>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+            <label style={{
+              display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+              fontSize: 12, color: "#00000077", marginLeft: 6,
+            }}>
+              <span style={{
+                padding: "4px 10px", borderRadius: 14, border: "1px solid #00000018",
+              }}>画像を追加</span>
+              {draft.length > 0 && <span style={{ color: "#00000044" }}>{draft.length}文字</span>}
+              <input type="file" accept="image/*" style={{ display: "none" }}
+                onChange={e => { handleImageFile(e.target.files[0], setDraftImage); e.target.value = ""; }} />
+            </label>
+            <button onClick={post} disabled={!draft.trim() && !draftImage} style={{
               padding: "7px 18px", borderRadius: 20, border: "none",
-              background: draft.trim() ? activeAlter.color : "#00000014",
-              color: draft.trim() ? "#2d2a3a" : "#00000055",
-              fontWeight: 700, fontSize: 13, cursor: draft.trim() ? "pointer" : "default",
+              background: (draft.trim() || draftImage) ? activeAlter.color : "#00000014",
+              color: (draft.trim() || draftImage) ? "#2d2a3a" : "#00000055",
+              fontWeight: 700, fontSize: 13, cursor: (draft.trim() || draftImage) ? "pointer" : "default",
             }}>投稿</button>
           </div>
         </div>
@@ -731,22 +854,47 @@ function App() {
                             fontFamily: "inherit", marginTop: 6,
                           }}
                         />
-                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-                          <button onClick={cancelEditPost} style={{
-                            padding: "6px 14px", borderRadius: 16, border: "1px solid #00000014",
-                            background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-                          }}>キャンセル</button>
-                          <button onClick={saveEditPost} disabled={!editPostDraft.trim()} style={{
-                            padding: "6px 14px", borderRadius: 16, border: "none",
-                            background: editPostDraft.trim() ? "#e6e6e6" : "#00000014",
-                            color: "#2d2a3a", fontWeight: 700, fontSize: 12,
-                            cursor: editPostDraft.trim() ? "pointer" : "default", fontFamily: "inherit",
-                          }}>保存</button>
+                        {editPostImage && (
+                          <div style={{ position: "relative", marginTop: 8 }}>
+                            <img src={editPostImage} alt="" style={{ maxWidth: "100%", maxHeight: 240, borderRadius: 12, display: "block" }} />
+                            <button onClick={() => setEditPostImage(null)} style={{
+                              position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%",
+                              border: "none", background: "#00000099", color: "#fff", fontSize: 16, cursor: "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>×</button>
+                          </div>
+                        )}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                          <label style={{
+                            display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                            fontSize: 12, color: "#00000077",
+                          }}>
+                            <span style={{ padding: "4px 10px", borderRadius: 14, border: "1px solid #00000018" }}>
+                              {editPostImage ? "画像を変更" : "画像を追加"}
+                            </span>
+                            <input type="file" accept="image/*" style={{ display: "none" }}
+                              onChange={e => { handleImageFile(e.target.files[0], setEditPostImage); e.target.value = ""; }} />
+                          </label>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={cancelEditPost} style={{
+                              padding: "6px 14px", borderRadius: 16, border: "1px solid #00000014",
+                              background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                            }}>キャンセル</button>
+                            <button onClick={saveEditPost} disabled={!editPostDraft.trim() && !editPostImage} style={{
+                              padding: "6px 14px", borderRadius: 16, border: "none",
+                              background: (editPostDraft.trim() || editPostImage) ? "#e6e6e6" : "#00000014",
+                              color: "#2d2a3a", fontWeight: 700, fontSize: 12,
+                              cursor: (editPostDraft.trim() || editPostImage) ? "pointer" : "default", fontFamily: "inherit",
+                            }}>保存</button>
+                          </div>
                         </div>
                       </div>
                     ) : (
                       <React.Fragment>
                         <div style={{ fontSize: 14, lineHeight: 1.8, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{p.content}</div>
+                        {p.image && (
+                          <img src={p.image} alt="" style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 12, marginTop: 8, display: "block" }} />
+                        )}
                         {p.tags && p.tags.length > 0 && (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                             {p.tags.map(t => (
@@ -962,6 +1110,17 @@ function App() {
               </div>
             )}
 
+            {/* Image filter */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>その他の絞り込み</div>
+              <button onClick={() => setImageOnly(v => !v)} style={{
+                fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
+                border: imageOnly ? "1px solid #00000018" : "1px solid #00000012",
+                background: imageOnly ? "#00000008" : "#ffffff",
+                color: "#2d2a3a", fontWeight: imageOnly ? 500 : 400,
+              }}>画像つきの投稿</button>
+            </div>
+
             {/* Calendar */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>カレンダーで履歴を見る</div>
@@ -1016,7 +1175,8 @@ function App() {
                         fontSize: 12, fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                       }}>
                         <span>{day}</span>
-                        {count > 0 && <span style={{ width: 4, height: 4, borderRadius: "50%", background: isSelected ? "#ffffff" : "#9b99a0" }} />}
+                        {count > 0 && <span style={{ alignSelf: "stretch", height: 1, background: "#00000018", marginLeft: 3, marginRight: 3 }} />}
+                        {count > 0 && <span style={{ fontSize: 9, color: isSelected ? "#ffffff" : "#9b99a0" }}>{count}件</span>}
                       </button>
                     );
                   })}
@@ -1035,8 +1195,9 @@ function App() {
                   return <span style={{ background: `${a.color}26`, borderRadius: 12, padding: "3px 10px" }}>{a.name}</span>;
                 })()}
                 {selectedTag && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>#{selectedTag}</span>}
+                {imageOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>画像つき</span>}
                 {selectedDate && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>{formatDateLabel(selectedDate)}</span>}
-                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); }} style={{
+                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); setImageOnly(false); }} style={{
                   border: "none", background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", textDecoration: "underline",
                 }}>クリア</button>
               </div>
@@ -1069,6 +1230,9 @@ function App() {
                     )}
                     {e.content && (
                       <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{e.content}</div>
+                    )}
+                    {e.image && (
+                      <img src={e.image} alt="" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 10, marginTop: 6, display: "block" }} />
                     )}
                     {e.tags && e.tags.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
@@ -1115,6 +1279,9 @@ function App() {
                     )}
                     {e.content && (
                       <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{e.content}</div>
+                    )}
+                    {e.image && (
+                      <img src={e.image} alt="" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 10, marginTop: 6, display: "block" }} />
                     )}
                     {e.tags && e.tags.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
@@ -1163,7 +1330,7 @@ function App() {
                 )}
 
                 <div style={{ fontSize: 12, color: "#00000066", margin: "10px 0 14px", textAlign: "center" }}>
-                  {statsYear}年の投稿数: {yearTotal}件
+                  {statsYear}年の投稿数（全{yearTotal}件・返信含む）
                 </div>
 
                 {/* Bar chart */}
@@ -1183,66 +1350,6 @@ function App() {
                   {monthlyCounts.map((c, i) => (
                     <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "#00000044" }}>{i + 1}月</div>
                   ))}
-                </div>
-              </div>
-            ),
-
-            monthly: (
-              <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <button onClick={() => setStatsMonth(({ y, m }) => m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 })} style={{
-                    border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
-                  }}>‹</button>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <select value={statsMonth.y} onChange={e => setStatsMonth(s => ({ ...s, y: Number(e.target.value) }))} style={{
-                      fontSize: 13, fontWeight: 400, color: "#2d2a3a", fontFamily: "inherit",
-                      border: "1px solid #00000014", borderRadius: 8, padding: "4px 8px", background: "#ffffff", cursor: "pointer",
-                    }}>
-                      {calendarYears.map(yy => <option key={yy} value={yy}>{yy}年</option>)}
-                    </select>
-                    <select value={statsMonth.m} onChange={e => setStatsMonth(s => ({ ...s, m: Number(e.target.value) }))} style={{
-                      fontSize: 13, fontWeight: 400, color: "#2d2a3a", fontFamily: "inherit",
-                      border: "1px solid #00000014", borderRadius: 8, padding: "4px 8px", background: "#ffffff", cursor: "pointer",
-                    }}>
-                      {Array.from({ length: 12 }).map((_, i) => <option key={i} value={i}>{i + 1}月</option>)}
-                    </select>
-                  </div>
-                  <button onClick={() => setStatsMonth(({ y, m }) => m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 })} style={{
-                    border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
-                  }}>›</button>
-                </div>
-                {(statsMonth.y !== nowYear || statsMonth.m !== new Date().getMonth()) && (
-                  <div style={{ textAlign: "center", marginBottom: 6 }}>
-                    <button onClick={() => setStatsMonth({ y: nowYear, m: new Date().getMonth() })} style={{
-                      border: "1px solid #00000014", background: "#ffffff", color: "#00000088",
-                      fontSize: 11, borderRadius: 12, padding: "3px 12px", cursor: "pointer", fontFamily: "inherit",
-                    }}>今月へ</button>
-                  </div>
-                )}
-
-                <div style={{ fontSize: 12, color: "#00000066", margin: "10px 0 14px", textAlign: "center" }}>
-                  {statsMonth.y}年{statsMonth.m + 1}月の投稿数: {monthTotal}件
-                </div>
-
-                {/* Daily bar chart */}
-                <div style={{ overflowX: "auto" }}>
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 140, minWidth: daysInStatsMonth * 16, padding: "0 4px" }}>
-                    {dailyCounts.map((c, i) => (
-                      <div key={i} style={{ width: 13, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", flexShrink: 0 }}>
-                        {c > 0 && <div style={{ fontSize: 9, color: "#00000066", marginBottom: 2 }}>{c}</div>}
-                        <div style={{
-                          width: 6, borderRadius: 3,
-                          background: c > 0 ? "#b0aeb5" : "#00000008",
-                          height: `${Math.max(c > 0 ? 6 : 2, (c / maxDailyCount) * 110)}px`,
-                        }} />
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", gap: 3, minWidth: daysInStatsMonth * 16, padding: "0 4px", marginTop: 4 }}>
-                    {dailyCounts.map((_, i) => (
-                      <div key={i} style={{ width: 13, textAlign: "center", fontSize: 9, color: "#00000044", flexShrink: 0 }}>{i + 1}</div>
-                    ))}
-                  </div>
                 </div>
               </div>
             ),
@@ -1274,7 +1381,7 @@ function App() {
             ) : null,
 
             timeofday: (function () {
-              const TIME_COLORS = ["#f5cf8f", "#8fbce8", "#a89ce0", "#7fd1bf"];
+              const TIME_COLORS = ["#f5d166", "#a9ddf0", "#6fa3e0", "#3f5fb0"];
               const total = timeOfDayCounts.reduce((a, b) => a + b, 0);
               const R = 60, C = 2 * Math.PI * R;
               let acc = 0;
@@ -1296,11 +1403,11 @@ function App() {
                   <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
                     <svg width="140" height="140" viewBox="0 0 140 140">
                       {total === 0 ? (
-                        <circle cx="70" cy="70" r={R} fill="none" stroke="#00000008" strokeWidth="16" />
+                        <circle cx="70" cy="70" r={R} fill="none" stroke="#00000008" strokeWidth="10" />
                       ) : (
                         <g transform="rotate(-90 70 70)">
                           {segments.map((s, i) => s.dasharray.split(" ")[0] !== "0" && (
-                            <circle key={i} cx="70" cy="70" r={R} fill="none" stroke={s.color} strokeWidth="16"
+                            <circle key={i} cx="70" cy="70" r={R} fill="none" stroke={s.color} strokeWidth="10"
                               strokeDasharray={s.dasharray} strokeDashoffset={s.dashoffset} />
                           ))}
                         </g>
@@ -1313,7 +1420,7 @@ function App() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {TIME_LABELS.map((l, i) => (
                       <div key={l} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: TIME_COLORS[i], flexShrink: 0 }} />
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: TIME_COLORS[i], opacity: 0.8, flexShrink: 0 }} />
                         <span style={{ fontSize: 12, color: "#2d2a3a", flex: 1 }}>{l}</span>
                         <span style={{ fontSize: 11, color: "#00000066" }}>
                           {timeOfDayCounts[i]}件{total > 0 ? `（${Math.round(timeOfDayCounts[i] / total * 100)}%）` : ""}
