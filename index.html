@@ -301,7 +301,6 @@ function App() {
 
   // --- Time-of-day breakdown ---
   // 0: 朝 5-11, 1: 昼 11-17, 2: 夜 17-23, 3: 深夜 23-5
-  const TIME_LABELS = ["朝（5-11時）", "昼（11-17時）", "夜（17-23時）", "深夜（23-5時）"];
   const timeOfDayCounts = [0, 0, 0, 0];
   allEntries.forEach(e => {
     const h = new Date(e.ts).getHours();
@@ -1392,6 +1391,7 @@ function App() {
 
             timeofday: (function () {
               const TIME_COLORS = ["#f5d166", "#a9ddf0", "#6fa3e0", "#3f5fb0"];
+              const SHORT_TIME_LABELS = ["朝", "昼", "夜", "深夜"];
               const total = timeOfDayCounts.reduce((a, b) => a + b, 0);
               const R = 60, C = 2 * Math.PI * R;
               let acc = 0;
@@ -1427,16 +1427,21 @@ function App() {
                       </text>
                     </svg>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {TIME_LABELS.map((l, i) => (
-                      <div key={l} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: TIME_COLORS[i], opacity: 0.8, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, color: "#2d2a3a", flex: 1 }}>{l}</span>
-                        <span style={{ fontSize: 11, color: "#00000066" }}>
-                          {timeOfDayCounts[i]}件{total > 0 ? `（${Math.round(timeOfDayCounts[i] / total * 100)}%）` : ""}
-                        </span>
-                      </div>
-                    ))}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {SHORT_TIME_LABELS.map((l, i) => {
+                      const pct = total > 0 ? Math.round(timeOfDayCounts[i] / total * 100) : 0;
+                      return (
+                        <div key={l}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                            <span style={{ fontSize: 12, color: "#2d2a3a" }}>{l}</span>
+                            <span style={{ fontSize: 11, color: "#00000066" }}>{pct}%</span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: "#00000008", overflow: "hidden" }}>
+                            <div style={{ height: "100%", borderRadius: 3, background: TIME_COLORS[i], opacity: 0.8, width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -1563,7 +1568,7 @@ function App() {
         {tab === "data" && (
           <div style={{ padding: "16px" }}>
             <div style={{ fontSize: 13, color: "#00000066", marginBottom: 4, lineHeight: 1.7 }}>
-              データはこの端末のブラウザに自動保存されます。念のためのバックアップとして、下のテキストをコピーして保管できます。機種変更やブラウザのデータ削除に備えると安心です。
+              データはこの端末のブラウザに自動保存されます。端末の空き容量にもよりますが、目安としてテキストの投稿なら1万件程度は問題なく記録できます。画像つきの投稿は、目安として1,000枚で約200〜500MB程度使います。念のためのバックアップとして、下のテキストをコピーして保管できます。機種変更やブラウザのデータ削除に備えると安心です。
             </div>
             <div style={{ fontSize: 12, color: "#00000077", marginTop: 10, lineHeight: 1.7, background: "#00000006", borderRadius: 10, padding: "10px 12px" }}>
               新しいバージョンを使う場合は、ホーム画面のアプリを一度削除して追加し直す必要があります。その際、保存されているデータは引き継がれないため、事前に下の「バックアップ用テキスト」をコピーしておき、新しいバージョンの「復元」に貼り付けてください。
