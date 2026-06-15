@@ -174,9 +174,7 @@ function App() {
   const [editingReplyKey, setEditingReplyKey] = useState(null); // `${postId}-${replyId}`
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyMenuOpenKey, setReplyMenuOpenKey] = useState(null);
-  const [importText, setImportText] = useState("");
   const [importMessage, setImportMessage] = useState("");
-  const [copyMessage, setCopyMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState(null);
   const [selectedMember, setSelectedMember] = useState(null);
@@ -515,20 +513,42 @@ function App() {
     setShowAdd(false);
   }
 
-  function copyBackup() {
+  async function downloadBackup() {
     const text = JSON.stringify({ alters, posts, statsOrder });
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text)
-        .then(() => { setCopyMessage("コピーしました。"); setTimeout(() => setCopyMessage(""), 2000); })
-        .catch(() => setCopyMessage("コピーに失敗しました。テキストを手動で選択してください。"));
-    } else {
-      setCopyMessage("テキストを長押しして選択・コピーしてください。");
+    const now = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const filename = `jinkaku-memo-backup-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.json`;
+
+    // iOS (especially home-screen PWAs) often can't trigger <a download>; use the share sheet instead.
+    if (navigator.canShare && navigator.canShare({ files: [new File([text], filename, { type: "application/json" })] })) {
+      try {
+        const file = new File([text], filename, { type: "application/json" });
+        await navigator.share({ files: [file], title: filename });
+        return;
+      } catch (err) {
+        if (err && err.name === "AbortError") return; // user cancelled the share sheet
+        // fall through to other methods
+      }
+    }
+
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
   }
 
-  function importData() {
+  function applyImportedData(text) {
     try {
-      const data = JSON.parse(importText);
+      const data = JSON.parse(text);
       if (!data || typeof data !== "object") throw new Error("invalid");
       if (Array.isArray(data.alters)) setAlters(data.alters);
       if (Array.isArray(data.posts)) setPosts(data.posts);
@@ -538,11 +558,18 @@ function App() {
         setStatsOrder(restored);
       }
       if (data.alters && data.alters.length > 0) setActiveAlterId(data.alters[0].id);
-      setImportMessage("読み込みました。");
-      setImportText("");
+      setImportMessage("復元しました。");
     } catch {
-      setImportMessage("読み込みに失敗しました。テキストの形式を確認してください。");
+      setImportMessage("読み込みに失敗しました。ファイルの形式を確認してください。");
     }
+  }
+
+  function handleImportFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => applyImportedData(String(reader.result || ""));
+    reader.onerror = () => setImportMessage("ファイルの読み込みに失敗しました。");
+    reader.readAsText(file);
   }
 
   function clearAllData() {
@@ -1568,42 +1595,31 @@ function App() {
         {tab === "data" && (
           <div style={{ padding: "16px" }}>
             <div style={{ fontSize: 13, color: "#00000066", marginBottom: 4, lineHeight: 1.9 }}>
-              データはこの端末のブラウザに自動保存されます。念のため、バックアップとして下のテキストをコピーして保管できます。機種変更やブラウザのデータ削除に備えると安心です。
+              データはこの端末のブラウザに自動保存されます。念のため、バックアップとしてファイルに保存しておくことができます。機種変更やブラウザのデータ削除に備えると安心です。
             </div>
             <div style={{ fontSize: 12, color: "#00000077", marginTop: 10, lineHeight: 1.7, background: "#00000006", borderRadius: 10, padding: "10px 12px" }}>
-              新しいバージョンを使う場合は、ホーム画面のアプリを一度削除して追加し直す必要があります。その際、保存されているデータは引き継がれないため、事前に下の「バックアップ用テキスト」をコピーしておき、新しいバージョンの「復元」に貼り付けてください。
+              新しいバージョンを使う場合は、ホーム画面のアプリを一度削除して追加し直す必要があります。その際、保存されているデータは引き継がれないため、事前に下の「ファイルとして保存」でファイルを保存しておき、新しいバージョンの「ファイルから復元」で読み込んでください。
             </div>
 
-            <div style={{ marginTop: 18, marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>バックアップ用テキスト</div>
-            <textarea readOnly value={JSON.stringify({ alters, posts, statsOrder })} onFocus={e => e.target.select()} rows={6}
-              style={{ width: "100%", background: "#00000006", border: "1px solid #00000012", borderRadius: 10, padding: "10px 12px", color: "#2d2a3a", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "monospace", resize: "vertical" }} />
-            <button onClick={copyBackup} style={{ marginTop: 8, padding: "8px 16px", borderRadius: 12, border: "1px solid #00000014", background: "transparent", color: "#2d2a3a", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>コピー</button>
-            {copyMessage && <span style={{ marginLeft: 10, fontSize: 12, color: "#00000099" }}>{copyMessage}</span>}
-
-            <div style={{ marginTop: 28, marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>復元（バックアップを貼り付け）</div>
-            <div style={{ position: "relative" }}>
-              <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportMessage(""); }} placeholder="ここにバックアップ用テキストを貼り付け" rows={6}
-                style={{ width: "100%", background: "#00000006", border: "1px solid #00000012", borderRadius: 10, padding: "10px 12px", color: "#2d2a3a", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "monospace", resize: "vertical" }} />
-              {importText.length > 0 && (
-                <button onClick={() => { setImportText(""); setImportMessage(""); }} aria-label="テキストを削除" style={{
-                  position: "absolute", top: 8, right: 8, width: 24, height: 24, borderRadius: "50%",
-                  border: "none", background: "#00000022", color: "#fff", fontSize: 14, cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>×</button>
-              )}
+            <div style={{ marginTop: 18, marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>バックアップ</div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+              <button onClick={downloadBackup} style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #00000014", background: "transparent", color: "#2d2a3a", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>ファイルとして保存</button>
+              <label style={{
+                display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+                fontSize: 12, color: "#00000077",
+              }}>
+                <span style={{ padding: "8px 16px", borderRadius: 12, border: "1px solid #00000014", color: "#2d2a3a", fontWeight: 600, fontSize: 13 }}>ファイルから復元</span>
+                <input type="file" accept=".json,application/json,.txt,text/plain"
+                  style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", border: 0 }}
+                  onChange={e => { handleImportFile(e.target.files[0]); e.target.value = ""; }} />
+              </label>
             </div>
-            <button onClick={importData} disabled={!importText.trim()} style={{
-              marginTop: 10, padding: "10px 18px", borderRadius: 12, border: "none",
-              background: importText.trim() ? "#e6e6e6" : "#00000014",
-              color: importText.trim() ? "#2d2a3a" : "#00000055",
-              fontWeight: 700, fontSize: 13, cursor: importText.trim() ? "pointer" : "default", fontFamily: "inherit",
-            }}>このテキストから復元する</button>
             {importMessage && <div style={{ marginTop: 10, fontSize: 12, color: "#00000099" }}>{importMessage}</div>}
 
             <div style={{ marginTop: 36, paddingTop: 18, borderTop: "1px solid #00000010" }}>
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>すべてのデータを消去</div>
               <div style={{ fontSize: 12, color: "#00000066", marginBottom: 10, lineHeight: 1.7 }}>
-                バージョンの更新がうまく反映されない場合などに、リセット用としてお使いください。投稿・メンバー情報がすべて削除され、元に戻せません。実行前に上の「バックアップ用テキスト」をコピーしておくと安心です。
+                バージョンの更新がうまく反映されない場合などに、リセット用としてお使いください。投稿・メンバー情報がすべて削除され、元に戻せません。実行前に上の「ファイルとして保存」をしておくと安心です。
               </div>
               {confirmClearAll ? (
                 <div style={{ border: "1px solid #e0a0a0", borderRadius: 12, padding: "12px 14px" }}>
