@@ -1,4 +1,4 @@
-const CACHE = "jinkaku-sns-v72";
+const CACHE = "jinkaku-sns-v74";
 const ASSETS = [
   "./index.html",
   "./manifest.json",

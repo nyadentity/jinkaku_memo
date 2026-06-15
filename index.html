@@ -738,7 +738,7 @@ function App() {
             }}
           />
           {draftImage && (
-            <div style={{ position: "relative", marginTop: 8, marginBottom: 4 }}>
+            <div style={{ position: "relative", display: "inline-block", marginTop: 8, marginBottom: 4 }}>
               <img src={draftImage} alt="" style={{ maxWidth: "100%", maxHeight: 240, borderRadius: 12, display: "block" }} />
               <button onClick={() => setDraftImage(null)} style={{
                 position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%",
@@ -855,7 +855,7 @@ function App() {
                           }}
                         />
                         {editPostImage && (
-                          <div style={{ position: "relative", marginTop: 8 }}>
+                          <div style={{ position: "relative", display: "inline-block", marginTop: 8 }}>
                             <img src={editPostImage} alt="" style={{ maxWidth: "100%", maxHeight: 240, borderRadius: 12, display: "block" }} />
                             <button onClick={() => setEditPostImage(null)} style={{
                               position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%",
