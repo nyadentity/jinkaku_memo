@@ -1118,7 +1118,7 @@ function App() {
                 border: imageOnly ? "1px solid #00000018" : "1px solid #00000012",
                 background: imageOnly ? "#00000008" : "#ffffff",
                 color: "#2d2a3a", fontWeight: imageOnly ? 500 : 400,
-              }}>画像つきの投稿</button>
+              }}>画像</button>
             </div>
 
             {/* Calendar */}
@@ -1175,7 +1175,7 @@ function App() {
                         fontSize: 12, fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                       }}>
                         <span>{day}</span>
-                        {count > 0 && <span style={{ alignSelf: "stretch", height: 1, background: "#00000018", marginLeft: 3, marginRight: 3 }} />}
+                        {count > 0 && <span style={{ alignSelf: "stretch", height: 1, background: "#00000018", marginLeft: 6, marginRight: 6 }} />}
                         {count > 0 && <span style={{ fontSize: 9, color: isSelected ? "#ffffff" : "#9b99a0" }}>{count}件</span>}
                       </button>
                     );
