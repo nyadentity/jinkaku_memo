@@ -120,6 +120,8 @@ function App() {
   const [copyMessage, setCopyMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState(null);
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [memberFilterExpanded, setMemberFilterExpanded] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD"
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
@@ -170,6 +172,7 @@ function App() {
   const q = searchQuery.trim().toLowerCase();
   const filteredPosts = allEntries.filter(e => {
     if (selectedTag && !(e.tags || []).includes(selectedTag)) return false;
+    if (selectedMember && e.alterId !== selectedMember) return false;
     if (selectedDate && dateKey(e.ts) !== selectedDate) return false;
     if (q) {
       const alterName = (alters.find(a => a.id === e.alterId) || { name: e.alterName }).name || "";
@@ -180,7 +183,7 @@ function App() {
     return true;
   });
 
-  const hasActiveFilter = !!(q || selectedTag || selectedDate);
+  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate);
 
   // Year options for the calendar selector: span post years + current + a small margin
   const nowYear = new Date().getFullYear();
@@ -234,7 +237,6 @@ function App() {
     else idx = 3;
     timeOfDayCounts[idx]++;
   });
-  const maxTimeOfDayCount = Math.max(1, ...timeOfDayCounts);
 
 
 
@@ -909,6 +911,40 @@ function App() {
               }}
             />
 
+            {/* Member search */}
+            {alters.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "#00000066" }}>メンバーで絞り込み</div>
+                  <button onClick={() => setMemberFilterExpanded(v => !v)} style={{
+                    border: "none", background: "transparent", color: "#00000077",
+                    fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: 0,
+                  }}>{memberFilterExpanded ? "閉じる ▲" : "表示 ▼"}</button>
+                </div>
+                <div style={{
+                  display: "flex", flexWrap: "wrap", gap: 6,
+                  maxHeight: memberFilterExpanded ? "none" : 0,
+                  overflow: "hidden",
+                }}>
+                  {alters.map(a => {
+                    const isSel = selectedMember === a.id;
+                    return (
+                      <button key={a.id} onClick={() => setSelectedMember(prev => prev === a.id ? null : a.id)} style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        fontSize: 12, borderRadius: 14, padding: "4px 12px 4px 4px", cursor: "pointer", fontFamily: "inherit",
+                        border: isSel ? `1px solid ${a.color}80` : "1px solid #00000012",
+                        background: isSel ? `${a.color}26` : "#ffffff",
+                        color: "#2d2a3a", fontWeight: isSel ? 600 : 400,
+                      }}>
+                        <Avatar alter={a} size={20} />
+                        {a.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Tag search */}
             {allTags.length > 0 && (
               <div style={{ marginBottom: 16 }}>
@@ -917,9 +953,9 @@ function App() {
                   {allTags.map(t => (
                     <button key={t} onClick={() => setSelectedTag(prev => prev === t ? null : t)} style={{
                       fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
-                      border: selectedTag === t ? "1px solid #00000022" : "1px solid #00000012",
-                      background: selectedTag === t ? "#00000010" : "#ffffff",
-                      color: "#2d2a3a", fontWeight: selectedTag === t ? 600 : 400,
+                      border: selectedTag === t ? "1px solid #00000018" : "1px solid #00000012",
+                      background: selectedTag === t ? "#00000008" : "#ffffff",
+                      color: "#2d2a3a", fontWeight: selectedTag === t ? 500 : 400,
                     }}>#{t}</button>
                   ))}
                 </div>
@@ -993,9 +1029,14 @@ function App() {
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 12, color: "#00000077" }}>
                 <span>絞り込み中:</span>
                 {q && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>「{searchQuery}」</span>}
+                {selectedMember && (() => {
+                  const a = alters.find(x => x.id === selectedMember);
+                  if (!a) return null;
+                  return <span style={{ background: `${a.color}26`, borderRadius: 12, padding: "3px 10px" }}>{a.name}</span>;
+                })()}
                 {selectedTag && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>#{selectedTag}</span>}
                 {selectedDate && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>{formatDateLabel(selectedDate)}</span>}
-                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedDate(null); }} style={{
+                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); }} style={{
                   border: "none", background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", textDecoration: "underline",
                 }}>クリア</button>
               </div>
@@ -1232,30 +1273,57 @@ function App() {
               </div>
             ) : null,
 
-            timeofday: (
-              <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
-                <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
-                  時間帯別の投稿傾向（返信含む）
+            timeofday: (function () {
+              const TIME_COLORS = ["#f5cf8f", "#8fbce8", "#a89ce0", "#7fd1bf"];
+              const total = timeOfDayCounts.reduce((a, b) => a + b, 0);
+              const R = 60, C = 2 * Math.PI * R;
+              let acc = 0;
+              const segments = timeOfDayCounts.map((c, i) => {
+                const frac = total > 0 ? c / total : 0;
+                const seg = {
+                  color: TIME_COLORS[i],
+                  dasharray: `${frac * C} ${C - frac * C}`,
+                  dashoffset: -acc * C,
+                };
+                acc += frac;
+                return seg;
+              });
+              return (
+                <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
+                  <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
+                    時間帯別の投稿傾向（返信含む）
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                    <svg width="140" height="140" viewBox="0 0 140 140">
+                      {total === 0 ? (
+                        <circle cx="70" cy="70" r={R} fill="none" stroke="#00000008" strokeWidth="16" />
+                      ) : (
+                        <g transform="rotate(-90 70 70)">
+                          {segments.map((s, i) => s.dasharray.split(" ")[0] !== "0" && (
+                            <circle key={i} cx="70" cy="70" r={R} fill="none" stroke={s.color} strokeWidth="16"
+                              strokeDasharray={s.dasharray} strokeDashoffset={s.dashoffset} />
+                          ))}
+                        </g>
+                      )}
+                      <text x="70" y="74" textAnchor="middle" fontSize="14" fill="#00000066" fontFamily="inherit">
+                        {total}件
+                      </text>
+                    </svg>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {TIME_LABELS.map((l, i) => (
+                      <div key={l} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: TIME_COLORS[i], flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: "#2d2a3a", flex: 1 }}>{l}</span>
+                        <span style={{ fontSize: 11, color: "#00000066" }}>
+                          {timeOfDayCounts[i]}件{total > 0 ? `（${Math.round(timeOfDayCounts[i] / total * 100)}%）` : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 120, padding: "0 4px" }}>
-                  {timeOfDayCounts.map((c, i) => (
-                    <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
-                      {c > 0 && <div style={{ fontSize: 10, color: "#00000066", marginBottom: 2 }}>{c}</div>}
-                      <div style={{
-                        width: 22, borderRadius: 4,
-                        background: c > 0 ? "#b0aeb5" : "#00000008",
-                        height: `${Math.max(c > 0 ? 6 : 2, (c / maxTimeOfDayCount) * 90)}px`,
-                      }} />
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: 10, padding: "0 4px", marginTop: 6 }}>
-                  {TIME_LABELS.map(l => (
-                    <div key={l} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "#00000044" }}>{l}</div>
-                  ))}
-                </div>
-              </div>
-            ),
+              );
+            })(),
           };
 
           return (
