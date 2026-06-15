@@ -170,6 +170,7 @@ function App() {
   const [editPostTags, setEditPostTags] = useState("");
   const [editPostImage, setEditPostImage] = useState(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [editingReplyKey, setEditingReplyKey] = useState(null); // `${postId}-${replyId}`
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyMenuOpenKey, setReplyMenuOpenKey] = useState(null);
@@ -545,6 +546,15 @@ function App() {
     }
   }
 
+  function clearAllData() {
+    setAlters([]);
+    setPosts([]);
+    setStatsOrder(DEFAULT_STATS_ORDER);
+    setActiveAlterId(null);
+    idbSave({ alters: [], posts: [], statsOrder: DEFAULT_STATS_ORDER }).catch(() => {});
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  }
+
   const inputStyle = {
     width: "100%", background: "#00000008", border: "1px solid #00000012",
     borderRadius: 10, padding: "10px 12px", color: "#2d2a3a",
@@ -625,7 +635,7 @@ function App() {
       }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: "0.05em" }}>
-            {tab === "members" ? "メンバー" : tab === "data" ? "バックアップ" : tab === "search" ? "検索" : tab === "stats" ? "統計" : tab === "bookmarks" ? "ブックマーク" : "人格メモ"}
+            {tab === "members" ? "メンバー" : tab === "data" ? "バックアップ/概要" : tab === "search" ? "検索" : tab === "stats" ? "統計" : tab === "bookmarks" ? "ブックマーク" : "人格メモ"}
           </div>
           <div style={{ fontSize: 11, color: "#00000066" }}>{alters.length}人のメンバー・{allEntries.length}件の投稿</div>
         </div>
@@ -644,7 +654,7 @@ function App() {
                 background: "#ffffff", borderRadius: 12, border: "1px solid #00000012",
                 boxShadow: "0 8px 24px #00000022", overflow: "hidden", minWidth: 160,
               }}>
-                {[["timeline", "タイムライン"], ["members", "メンバー"], ["search", "検索"], ["stats", "統計"], ["bookmarks", "ブックマーク"], ["data", "バックアップ"]].map(([k, l]) => (
+                {[["timeline", "タイムライン"], ["members", "メンバー"], ["search", "検索"], ["stats", "統計"], ["bookmarks", "ブックマーク"], ["data", "バックアップ/概要"]].map(([k, l]) => (
                   <button key={k} onClick={() => { setTab(k); setMenuOpen(false); }} style={{
                     display: "block", width: "100%", textAlign: "left", border: "none",
                     background: tab === k ? "#00000008" : "transparent",
@@ -1555,6 +1565,9 @@ function App() {
             <div style={{ fontSize: 13, color: "#00000066", marginBottom: 4, lineHeight: 1.7 }}>
               データはこの端末のブラウザに自動保存されます。念のためのバックアップとして、下のテキストをコピーして保管できます。機種変更やブラウザのデータ削除に備えると安心です。
             </div>
+            <div style={{ fontSize: 12, color: "#00000077", marginTop: 10, lineHeight: 1.7, background: "#00000006", borderRadius: 10, padding: "10px 12px" }}>
+              新しいバージョンを使う場合は、ホーム画面のアプリを一度削除して追加し直す必要があります。その際、保存されているデータは引き継がれないため、事前に下の「バックアップ用テキスト」をコピーしておき、新しいバージョンの「復元」に貼り付けてください。
+            </div>
 
             <div style={{ marginTop: 18, marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>バックアップ用テキスト</div>
             <textarea readOnly value={JSON.stringify({ alters, posts, statsOrder })} onFocus={e => e.target.select()} rows={6}
@@ -1563,8 +1576,17 @@ function App() {
             {copyMessage && <span style={{ marginLeft: 10, fontSize: 12, color: "#00000099" }}>{copyMessage}</span>}
 
             <div style={{ marginTop: 28, marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>復元（バックアップを貼り付け）</div>
-            <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportMessage(""); }} placeholder="ここにバックアップ用テキストを貼り付け" rows={6}
-              style={{ width: "100%", background: "#00000006", border: "1px solid #00000012", borderRadius: 10, padding: "10px 12px", color: "#2d2a3a", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "monospace", resize: "vertical" }} />
+            <div style={{ position: "relative" }}>
+              <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportMessage(""); }} placeholder="ここにバックアップ用テキストを貼り付け" rows={6}
+                style={{ width: "100%", background: "#00000006", border: "1px solid #00000012", borderRadius: 10, padding: "10px 12px", color: "#2d2a3a", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "monospace", resize: "vertical" }} />
+              {importText.length > 0 && (
+                <button onClick={() => { setImportText(""); setImportMessage(""); }} aria-label="テキストを削除" style={{
+                  position: "absolute", top: 8, right: 8, width: 24, height: 24, borderRadius: "50%",
+                  border: "none", background: "#00000022", color: "#fff", fontSize: 14, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>×</button>
+              )}
+            </div>
             <button onClick={importData} disabled={!importText.trim()} style={{
               marginTop: 10, padding: "10px 18px", borderRadius: 12, border: "none",
               background: importText.trim() ? "#e6e6e6" : "#00000014",
@@ -1572,6 +1594,56 @@ function App() {
               fontWeight: 700, fontSize: 13, cursor: importText.trim() ? "pointer" : "default", fontFamily: "inherit",
             }}>このテキストから復元する</button>
             {importMessage && <div style={{ marginTop: 10, fontSize: 12, color: "#00000099" }}>{importMessage}</div>}
+
+            <div style={{ marginTop: 36, paddingTop: 18, borderTop: "1px solid #00000010" }}>
+              <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>すべてのデータを消去</div>
+              <div style={{ fontSize: 12, color: "#00000066", marginBottom: 10, lineHeight: 1.7 }}>
+                バージョンの更新がうまく反映されない場合などに、リセット用としてお使いください。投稿・メンバー情報がすべて削除され、元に戻せません。実行前に上の「バックアップ用テキスト」をコピーしておくと安心です。
+              </div>
+              {confirmClearAll ? (
+                <div style={{ border: "1px solid #e0a0a0", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 12, color: "#c06060", marginBottom: 10, lineHeight: 1.7 }}>
+                    本当にすべてのデータを消去しますか？この操作は取り消せません。
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setConfirmClearAll(false)} style={{
+                      padding: "8px 16px", borderRadius: 12, border: "1px solid #00000014",
+                      background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}>キャンセル</button>
+                    <button onClick={() => { clearAllData(); setConfirmClearAll(false); }} style={{
+                      padding: "8px 16px", borderRadius: 12, border: "none",
+                      background: "#c06060", color: "#ffffff", fontWeight: 700, fontSize: 13,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}>消去する</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmClearAll(true)} style={{
+                  padding: "8px 16px", borderRadius: 12, border: "1px solid #e0a0a0",
+                  background: "transparent", color: "#c06060", fontWeight: 600, fontSize: 13,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}>すべてのデータを消去</button>
+              )}
+            </div>
+
+            {/* About */}
+            <div style={{ marginTop: 36, paddingTop: 18, borderTop: "1px solid #00000010" }}>
+              <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>概要</div>
+              <div style={{ fontSize: 13, color: "#2d2a3a", lineHeight: 1.9 }}>
+                人格メモは、内部に複数の人格や存在がいる方のためのメモアプリです。
+              </div>
+              <div style={{ marginTop: 12, fontSize: 12, color: "#00000077", lineHeight: 1.9 }}>
+                このアプリは制作者が善意で無償提供しているものです。データの消失・不具合・その他いかなる問題が生じた場合も、制作者は責任を負いません。あらかじめご了承のうえ、念のため上の「バックアップ用テキスト」から定期的にデータを保存しておくことをおすすめします。
+              </div>
+              <div style={{ marginTop: 16, fontSize: 12, color: "#00000066" }}>
+                制作者：にゃ子（
+                <a href="https://x.com/nyadentity" target="_blank" rel="noopener noreferrer" style={{ color: "#7c8fd6" }}>
+                  @nyadentity
+                </a>
+                ）
+              </div>
+            </div>
           </div>
         )}
       </div>
