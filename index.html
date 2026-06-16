@@ -31,6 +31,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 
 <script type="text/babel">
@@ -187,6 +188,7 @@ function App() {
   });
   const [statsYear, setStatsYear] = useState(() => new Date().getFullYear());
   const [statsMenuOpenKey, setStatsMenuOpenKey] = useState(null);
+  const [statsCapturing, setStatsCapturing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -513,6 +515,35 @@ function App() {
     setShowAdd(false);
   }
 
+  async function captureStats() {
+    const el = document.getElementById("stats-capture-area");
+    if (!el || typeof html2canvas === "undefined") { setStatsCapturing(false); return; }
+    const now = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const filename = `jinkaku-memo-stats-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}.png`;
+    try {
+      const canvas = await html2canvas(el, { backgroundColor: "#fbfaf8", scale: 2, useCORS: true, logging: false });
+      canvas.toBlob(async blob => {
+        if (!blob) return;
+        const file = new File([blob], filename, { type: "image/png" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file] }).catch(err => {
+            if (err && err.name === "AbortError") return;
+          });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = filename; a.rel = "noopener";
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        setStatsCapturing(false);
+      }, "image/png");
+    } catch(e) {
+      setStatsCapturing(false);
+    }
+  }
+
   async function downloadBackup() {
     const text = JSON.stringify({ alters, posts, statsOrder });
     const now = new Date();
@@ -523,7 +554,7 @@ function App() {
     if (navigator.canShare && navigator.canShare({ files: [new File([text], filename, { type: "application/json" })] })) {
       try {
         const file = new File([text], filename, { type: "application/json" });
-        await navigator.share({ files: [file], title: filename });
+        await navigator.share({ files: [file] });
         return;
       } catch (err) {
         if (err && err.name === "AbortError") return; // user cancelled the share sheet
@@ -1418,7 +1449,7 @@ function App() {
 
             timeofday: (function () {
               const TIME_COLORS = ["#f5d166", "#a9ddf0", "#6fa3e0", "#3f5fb0"];
-              const SHORT_TIME_LABELS = ["朝", "昼", "夜", "深夜"];
+              const SHORT_TIME_LABELS = ["朝（5〜11時）", "昼（11〜17時）", "夜（17〜23時）", "深夜（23〜5時）"];
               const total = timeOfDayCounts.reduce((a, b) => a + b, 0);
               const R = 60, C = 2 * Math.PI * R;
               let acc = 0;
@@ -1477,6 +1508,13 @@ function App() {
 
           return (
             <div style={{ padding: "8px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                <button onClick={() => { setStatsCapturing(true); setTimeout(captureStats, 100); }} style={{
+                  fontSize: 12, padding: "5px 12px", borderRadius: 14, border: "1px solid #00000018",
+                  background: "transparent", color: "#2d2a3a", cursor: "pointer", fontFamily: "inherit",
+                }}>画像として保存</button>
+              </div>
+              <div id="stats-capture-area" style={{ background: "#fbfaf8" }}>
               {statsOrder.map((key, idx) => {
                 const content = statsSections[key];
                 if (!content) return null;
@@ -1515,6 +1553,7 @@ function App() {
                   </div>
                 );
               })}
+              </div>
             </div>
           );
         })()}
@@ -1616,7 +1655,7 @@ function App() {
             </div>
             {importMessage && <div style={{ marginTop: 10, fontSize: 12, color: "#00000099" }}>{importMessage}</div>}
 
-            <div style={{ marginTop: 36, paddingTop: 18, borderTop: "1px solid #00000010" }}>
+            <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid #00000010" }}>
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>すべてのデータを消去</div>
               <div style={{ fontSize: 12, color: "#00000066", marginBottom: 10, lineHeight: 1.7 }}>
                 バージョンの更新がうまく反映されない場合などに、リセット用としてお使いください。投稿・メンバー情報がすべて削除され、元に戻せません。実行前に上の「ファイルとして保存」をしておくと安心です。
@@ -1652,7 +1691,7 @@ function App() {
             <div style={{ marginTop: 36, paddingTop: 18, borderTop: "1px solid #00000010" }}>
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>概要</div>
               <div style={{ fontSize: 13, color: "#2d2a3a", lineHeight: 1.9 }}>
-                人格メモは、内部に複数の人格や存在がいる方のためのメモアプリです。
+                人格メモは、内部に複数の人格がいる方のためのメモアプリです。
               </div>
               <div style={{ marginTop: 12, fontSize: 12, color: "#00000077", lineHeight: 1.9 }}>
                 このアプリは制作者が善意で無償提供しているものです。データの消失・不具合・その他いかなる問題が生じた場合も、制作者は責任を負いません。あらかじめご了承のうえ、念のため上のバックアップから定期的にデータを保存しておくことをおすすめします。
