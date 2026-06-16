@@ -1664,10 +1664,9 @@ function App() {
 
               {/* Add new group — top, compact */}
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 10 }}>
-                <div style={{ position: "relative", flexShrink: 0 }}>
-                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: newGroupColor, cursor: "pointer", border: "1px solid #00000018" }} onClick={() => document.getElementById("gcp-new").click()} />
-                  <input type="color" id="gcp-new" value={newGroupColor} onChange={e => setNewGroupColor(e.target.value)}
-                    style={{ position: "absolute", opacity: 0, width: 0, height: 0 }} />
+                <div style={{ position: "relative", flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: newGroupColor, border: "1px solid #00000018", overflow: "hidden" }}>
+                  <input type="color" value={newGroupColor} onChange={e => setNewGroupColor(e.target.value)}
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: "none", padding: 0 }} />
                 </div>
                 <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && addGroup()}
@@ -1694,10 +1693,9 @@ function App() {
                       {editingGroupId === g.id && editGroupForm && (
                         <div style={{ padding: "10px 12px", background: "#00000006", borderRadius: 10, border: "1px solid #00000010", marginTop: 4, overflow: "hidden" }}>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-                            <div style={{ position: "relative", flexShrink: 0 }}>
-                              <div style={{ width: 20, height: 20, borderRadius: "50%", background: editGroupForm.color, cursor: "pointer", border: "1px solid #00000018" }} onClick={() => document.getElementById(`gcp-edit-${g.id}`).click()} />
-                              <input type="color" id={`gcp-edit-${g.id}`} value={editGroupForm.color} onChange={e => setEditGroupForm(f => ({ ...f, color: e.target.value }))}
-                                style={{ position: "absolute", opacity: 0, width: 0, height: 0 }} />
+                            <div style={{ position: "relative", flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: editGroupForm.color, border: "1px solid #00000018", overflow: "hidden" }}>
+                              <input type="color" value={editGroupForm.color} onChange={e => setEditGroupForm(f => ({ ...f, color: e.target.value }))}
+                                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: "none", padding: 0 }} />
                             </div>
                             <input value={editGroupForm.name} onChange={e => setEditGroupForm(f => ({ ...f, name: e.target.value }))}
                               style={{ flex: 1, border: "1px solid #00000014", borderRadius: 8, padding: "5px 10px", fontSize: 12, outline: "none", fontFamily: "inherit", color: "#2d2a3a", background: "#ffffff" }} />
