@@ -347,7 +347,7 @@ function App() {
       const img = new Image();
       img.onload = () => {
         // Downscale large images while keeping quality high (avoid visible artifacts)
-        const maxDim = 1200;
+        const maxDim = 800;
         let { width, height } = img;
         if (width > maxDim || height > maxDim) {
           const scale = maxDim / Math.max(width, height);
@@ -358,7 +358,7 @@ function App() {
         canvas.width = width;
         canvas.height = height;
         canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        setter(canvas.toDataURL("image/jpeg", 0.65));
+        setter(canvas.toDataURL("image/jpeg", 0.4));
       };
       img.src = reader.result;
     };
@@ -1781,7 +1781,7 @@ function App() {
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>ストレージ使用量の目安</div>
               <div style={{ fontSize: 12, color: "#00000066", lineHeight: 1.9 }}>
                 テキストのみの投稿：1万件で約2〜5MB程度<br />
-                画像つきの投稿：1,000枚で約100〜250MB程度（現在の画質設定）<br />
+                画像つきの投稿：1,000枚で約30〜80MB程度（現在の画質設定）<br />
                 いずれも端末の空き容量の範囲で保存できます。
               </div>
             </div>
