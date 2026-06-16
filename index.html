@@ -87,7 +87,6 @@ function normalizeState(data) {
   return {
     alters: (data && data.alters) || [],
     posts: (data && data.posts) || [],
-    groups: (data && data.groups) || [],
     statsOrder,
   };
 }
@@ -151,7 +150,6 @@ function Avatar({ alter, size = 40 }) {
 function App() {
   const [alters, setAlters] = useState([]);
   const [posts, setPosts] = useState([]);
-  const [groups, setGroups] = useState([]);
   const [statsOrder, setStatsOrder] = useState(DEFAULT_STATS_ORDER);
   const [activeAlterId, setActiveAlterId] = useState(null);
   const [loaded, setLoaded] = useState(false);
@@ -164,10 +162,6 @@ function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
-  const [newGroupName, setNewGroupName] = useState("");
-  const [newGroupColor, setNewGroupColor] = useState("#a89ce0");
-  const [editingGroupId, setEditingGroupId] = useState(null);
-  const [editGroupForm, setEditGroupForm] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [replyAlterId, setReplyAlterId] = useState(null);
@@ -200,7 +194,6 @@ function App() {
       if (cancelled) return;
       setAlters(data.alters);
       setPosts(data.posts);
-      setGroups(data.groups || []);
       setStatsOrder(data.statsOrder);
       setActiveAlterId(data.alters[0] ? data.alters[0].id : null);
       setLoaded(true);
@@ -210,8 +203,8 @@ function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    idbSave({ alters, posts, groups, statsOrder }).catch(() => {});
-  }, [alters, posts, groups, statsOrder, loaded]);
+    idbSave({ alters, posts, statsOrder }).catch(() => {});
+  }, [alters, posts, statsOrder, loaded]);
 
   if (!loaded) {
     return (
@@ -520,24 +513,8 @@ function App() {
     setShowAdd(false);
   }
 
-  function addGroup() {
-    if (!newGroupName.trim()) return;
-    const g = { id: Date.now().toString(), name: newGroupName.trim(), color: newGroupColor };
-    setGroups(prev => [...prev, g]);
-    setNewGroupName("");
-  }
-
-  function updateGroupColor(id, color) {
-    setGroups(prev => prev.map(g => g.id === id ? { ...g, color } : g));
-  }
-
-  function deleteGroup(id) {
-    setGroups(prev => prev.filter(g => g.id !== id));
-    setAlters(prev => prev.map(a => a.groupId === id ? { ...a, groupId: null } : a));
-  }
-
   async function downloadBackup() {
-    const text = JSON.stringify({ alters, posts, groups, statsOrder });
+    const text = JSON.stringify({ alters, posts, statsOrder });
     const now = new Date();
     const pad = n => String(n).padStart(2, "0");
     const filename = `jinkaku-memo-backup-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.json`;
@@ -575,7 +552,6 @@ function App() {
       if (!data || typeof data !== "object") throw new Error("invalid");
       if (Array.isArray(data.alters)) setAlters(data.alters);
       if (Array.isArray(data.posts)) setPosts(data.posts);
-      if (Array.isArray(data.groups)) setGroups(data.groups);
       if (Array.isArray(data.statsOrder)) {
         const restored = data.statsOrder.filter(k => DEFAULT_STATS_ORDER.includes(k));
         DEFAULT_STATS_ORDER.forEach(k => { if (!restored.includes(k)) restored.push(k); });
@@ -601,8 +577,7 @@ function App() {
     setPosts([]);
     setStatsOrder(DEFAULT_STATS_ORDER);
     setActiveAlterId(null);
-    setGroups([]);
-    idbSave({ alters: [], posts: [], groups: [], statsOrder: DEFAULT_STATS_ORDER }).catch(() => {});
+    idbSave({ alters: [], posts: [], statsOrder: DEFAULT_STATS_ORDER }).catch(() => {});
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }
 
@@ -724,38 +699,23 @@ function App() {
       {/* Alter selector strip with + add button */}
       {tab === "timeline" && (
       <div className="strip" style={{
-        padding: "8px 16px", overflowX: "auto", display: "flex", gap: 8,
-        borderBottom: "1px solid #00000008", alignItems: "flex-start",
+        padding: "12px 16px", overflowX: "auto", display: "flex", gap: 10,
+        borderBottom: "1px solid #00000008",
       }}>
-        {(() => {
-          const renderBtn = a => (
-            <button key={a.id} onClick={() => setActiveAlterId(a.id)} style={{
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-              border: "none", cursor: "pointer", padding: "4px 6px",
-              borderRadius: 10, flexShrink: 0,
-              outline: activeAlterId === a.id ? `2px solid ${a.color}` : "none",
-              background: activeAlterId === a.id ? `${a.color}18` : "transparent",
-            }}>
-              <Avatar alter={a} size={36} />
-              <span style={{ fontSize: 10, color: activeAlterId === a.id ? a.color : "#00000099", whiteSpace: "nowrap" }}>
-                {a.name}
-              </span>
-            </button>
-          );
-          const result = [];
-          groups.forEach(g => {
-            const members = alters.filter(a => a.groupId === g.id);
-            if (members.length === 0) return;
-            result.push(
-              <div key={`gs-${g.id}`} style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                {members.map(renderBtn)}
-              </div>
-            );
-          });
-          const ungrouped = alters.filter(a => !a.groupId || !groups.find(g => g.id === a.groupId));
-          ungrouped.forEach(a => result.push(renderBtn(a)));
-          return result;
-        })()}
+        {alters.map(a => (
+          <button key={a.id} onClick={() => setActiveAlterId(a.id)} style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+            border: "none", cursor: "pointer", padding: "4px 8px",
+            borderRadius: 10, flexShrink: 0,
+            outline: activeAlterId === a.id ? `2px solid ${a.color}` : "none",
+            background: activeAlterId === a.id ? `${a.color}18` : "transparent",
+          }}>
+            <Avatar alter={a} size={36} />
+            <span style={{ fontSize: 10, color: activeAlterId === a.id ? a.color : "#00000099", whiteSpace: "nowrap" }}>
+              {a.name}
+            </span>
+          </button>
+        ))}
       </div>
       )}
 
@@ -1562,7 +1522,6 @@ function App() {
 
         {/* Members (view, reorder, add) */}
         {tab === "members" && (
-          <React.Fragment>
           <div style={{ padding: "8px 16px" }}>
             <button onClick={() => { setShowAdd(true); setAddForm({ name: "", emoji: "", color: PALETTE[alters.length % PALETTE.length], bio: "" }); window.scrollTo(0, 0); }} style={{
               width: "100%", padding: "11px", borderRadius: 12, border: "1px dashed #00000022",
@@ -1576,147 +1535,47 @@ function App() {
               </div>
             )}
 
-            {/* Grouped display */}
-            {(() => {
-              const renderMember = (a, borderBottom) => {
-                const idx = alters.indexOf(a);
-                return (
-                  <div key={a.id} style={borderBottom ? { borderBottom: "1px solid #00000006" } : {}}>
-                    <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "12px 0" }}>
-                      <Avatar alter={a} size={44} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, color: a.color, fontSize: 15 }}>{a.name}</div>
-                        {a.bio && <div style={{ fontSize: 12, color: "#00000066", marginTop: 3 }}>{a.bio}</div>}
-                        <div style={{ fontSize: 11, color: "#00000033", marginTop: 4 }}>{allEntries.filter(e => e.alterId === a.id).length}件の投稿</div>
-                      </div>
-                      <div style={{ flexShrink: 0 }}>
-                        <button onClick={() => editingId === a.id ? cancelEdit() : startEdit(a)} style={{ padding: "5px 12px", borderRadius: 14, border: "1px solid #00000014", background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer" }}>{editingId === a.id ? "閉じる" : "編集"}</button>
-                      </div>
-                    </div>
-                    {editingId === a.id && editForm && (
-                      <div style={{ padding: "12px 0 20px", borderTop: "1px solid #00000006" }}>
-                        {renderFormFields(editForm, setEditForm)}
-                        {groups.length > 0 && (
-                          <div style={{ marginBottom: 14 }}>
-                            <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>グループ</div>
-                            <select value={editForm.groupId || ""} onChange={e => setEditForm(f => ({ ...f, groupId: e.target.value || null }))} style={{
-                              width: "100%", fontSize: 13, color: "#2d2a3a", fontFamily: "inherit",
-                              border: "1px solid #00000014", borderRadius: 10, padding: "9px 12px",
-                              background: "#ffffff", cursor: "pointer", outline: "none",
-                            }}>
-                              <option value="">グループなし</option>
-                              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                            </select>
-                          </div>
-                        )}
-                        {alters.length > 1 && (
-                          <div style={{ marginBottom: 14 }}>
-                            <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>並び順</div>
-                            <div style={{ display: "flex", gap: 8 }}>
-                              <button onClick={() => moveAlter(a.id, -1)} disabled={idx === 0} style={{ flex: 1, padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: idx === 0 ? "#00000022" : "#2d2a3a", fontSize: 12, cursor: idx === 0 ? "default" : "pointer", fontFamily: "inherit" }}>▲ 上へ</button>
-                              <button onClick={() => moveAlter(a.id, 1)} disabled={idx === alters.length - 1} style={{ flex: 1, padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: idx === alters.length - 1 ? "#00000022" : "#2d2a3a", fontSize: 12, cursor: idx === alters.length - 1 ? "default" : "pointer", fontFamily: "inherit" }}>▼ 下へ</button>
-                            </div>
-                          </div>
-                        )}
-                        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                          <button onClick={saveEdit} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#e6e6e6", color: "#2d2a3a", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>保存</button>
-                          <button onClick={cancelEdit} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px solid #00000014", background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>キャンセル</button>
-                        </div>
-                        <div style={{ padding: "12px", borderRadius: 12, background: "#f2f2f2", border: "1px solid #00000010" }}>
-                          <div style={{ fontSize: 12, color: "#00000077", marginBottom: 10, lineHeight: 1.6 }}>このメンバーを削除します。投稿をどうしますか？</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            <button onClick={() => { if (confirm(`「${a.name}」を削除し、投稿は残します。よろしいですか？`)) deleteAlter(a.id, true); }} style={{ padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: "#2d2a3a", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>削除して投稿は残す</button>
-                            <button onClick={() => { if (confirm(`「${a.name}」と、その投稿・返信をすべて削除します。よろしいですか？`)) deleteAlter(a.id, false); }} style={{ padding: "9px", borderRadius: 10, border: "none", background: "#cfced2", color: "#2d2a3a", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>投稿ごと削除する</button>
-                          </div>
+            {alters.map((a, idx) => (
+              <div key={a.id} style={{ borderBottom: "1px solid #00000006" }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "12px 0" }}>
+                  <Avatar alter={a} size={44} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: a.color, fontSize: 15 }}>{a.name}</div>
+                    {a.bio && <div style={{ fontSize: 12, color: "#00000066", marginTop: 3 }}>{a.bio}</div>}
+                    <div style={{ fontSize: 11, color: "#00000033", marginTop: 4 }}>{allEntries.filter(e => e.alterId === a.id).length}件の投稿</div>
+                  </div>
+                  <div style={{ flexShrink: 0 }}>
+                    <button onClick={() => editingId === a.id ? cancelEdit() : startEdit(a)} style={{ padding: "5px 12px", borderRadius: 14, border: "1px solid #00000014", background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer" }}>{editingId === a.id ? "閉じる" : "編集"}</button>
+                  </div>
+                </div>
+                {editingId === a.id && editForm && (
+                  <div style={{ padding: "12px 0 20px", borderTop: "1px solid #00000006" }}>
+                    {renderFormFields(editForm, setEditForm)}
+                    {alters.length > 1 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>並び順</div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={() => moveAlter(a.id, -1)} disabled={idx === 0} style={{ flex: 1, padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: idx === 0 ? "#00000022" : "#2d2a3a", fontSize: 12, cursor: idx === 0 ? "default" : "pointer", fontFamily: "inherit" }}>▲ 上へ</button>
+                          <button onClick={() => moveAlter(a.id, 1)} disabled={idx === alters.length - 1} style={{ flex: 1, padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: idx === alters.length - 1 ? "#00000022" : "#2d2a3a", fontSize: 12, cursor: idx === alters.length - 1 ? "default" : "pointer", fontFamily: "inherit" }}>▼ 下へ</button>
                         </div>
                       </div>
                     )}
-                  </div>
-                );
-              };
-
-              const result = [];
-              groups.forEach(g => {
-                const members = alters.filter(a => a.groupId === g.id);
-                if (members.length === 0) return;
-                result.push(
-                  <div key={`group-${g.id}`} style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0 2px" }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: g.color, whiteSpace: "nowrap" }}>{g.name}</span>
-                      <div style={{ flex: 1, height: 2, background: `${g.color}88`, borderRadius: 2 }} />
+                    <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                      <button onClick={saveEdit} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#e6e6e6", color: "#2d2a3a", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>保存</button>
+                      <button onClick={cancelEdit} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px solid #00000014", background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>キャンセル</button>
                     </div>
-                    {members.map((a, i) => renderMember(a, i < members.length - 1))}
-                  </div>
-                );
-              });
-              const ungrouped = alters.filter(a => !a.groupId || !groups.find(g => g.id === a.groupId));
-              if (ungrouped.length > 0) {
-                result.push(<div key="ungrouped">{ungrouped.map((a, i) => renderMember(a, i < ungrouped.length - 1))}</div>);
-              }
-              return result;
-            })()}
-          </div>
-
-          {/* Group management */}
-          <div style={{ padding: "0 16px 24px" }}>
-            <div style={{ borderTop: "1px solid #00000010", paddingTop: 18, marginTop: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#2d2a3a", marginBottom: 10 }}>グループ管理</div>
-
-              {/* Add new group — top, compact */}
-              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 10 }}>
-                <div style={{ position: "relative", flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: newGroupColor, border: "1px solid #00000018", overflow: "hidden" }}>
-                  <input type="color" value={newGroupColor} onChange={e => setNewGroupColor(e.target.value)}
-                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: "none", padding: 0 }} />
-                </div>
-                <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && addGroup()}
-                  placeholder="グループ名を入力"
-                  style={{ flex: 1, border: "1px solid #00000014", borderRadius: 8, padding: "5px 10px", fontSize: 12, outline: "none", fontFamily: "inherit", color: "#2d2a3a", background: "#ffffff" }} />
-                <button onClick={addGroup} disabled={!newGroupName.trim()} style={{
-                  padding: "5px 10px", borderRadius: 8, border: "none", flexShrink: 0,
-                  background: newGroupName.trim() ? "#e6e6e6" : "#00000014",
-                  color: newGroupName.trim() ? "#2d2a3a" : "#00000033",
-                  fontWeight: 600, fontSize: 12, cursor: newGroupName.trim() ? "pointer" : "default", fontFamily: "inherit",
-                }}>追加</button>
-              </div>
-
-              {/* Group list */}
-              {groups.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {groups.map(g => (
-                    <div key={g.id}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, background: `${g.color}10`, border: `1px solid ${g.color}44` }}>
-                        <div style={{ width: 14, height: 14, borderRadius: "50%", background: g.color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 13, color: "#2d2a3a", flex: 1 }}>{g.name}</span>
-                        <button onClick={() => { if (editingGroupId === g.id) { setEditingGroupId(null); setEditGroupForm(null); } else { setEditingGroupId(g.id); setEditGroupForm({ name: g.name, color: g.color }); } }} style={{ border: "none", background: "transparent", color: "#00000066", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>{editingGroupId === g.id ? "閉じる" : "編集"}</button>
+                    <div style={{ padding: "12px", borderRadius: 12, background: "#f2f2f2", border: "1px solid #00000010" }}>
+                      <div style={{ fontSize: 12, color: "#00000077", marginBottom: 10, lineHeight: 1.6 }}>このメンバーを削除します。投稿をどうしますか？</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <button onClick={() => { if (confirm(`「${a.name}」を削除し、投稿は残します。よろしいですか？`)) deleteAlter(a.id, true); }} style={{ padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: "#2d2a3a", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>削除して投稿は残す</button>
+                        <button onClick={() => { if (confirm(`「${a.name}」と、その投稿・返信をすべて削除します。よろしいですか？`)) deleteAlter(a.id, false); }} style={{ padding: "9px", borderRadius: 10, border: "none", background: "#cfced2", color: "#2d2a3a", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>投稿ごと削除する</button>
                       </div>
-                      {editingGroupId === g.id && editGroupForm && (
-                        <div style={{ padding: "10px 12px", background: "#00000006", borderRadius: 10, border: "1px solid #00000010", marginTop: 4, overflow: "hidden" }}>
-                          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-                            <div style={{ position: "relative", flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: editGroupForm.color, border: "1px solid #00000018", overflow: "hidden" }}>
-                              <input type="color" value={editGroupForm.color} onChange={e => setEditGroupForm(f => ({ ...f, color: e.target.value }))}
-                                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: "none", padding: 0 }} />
-                            </div>
-                            <input value={editGroupForm.name} onChange={e => setEditGroupForm(f => ({ ...f, name: e.target.value }))}
-                              style={{ flex: 1, border: "1px solid #00000014", borderRadius: 8, padding: "5px 10px", fontSize: 12, outline: "none", fontFamily: "inherit", color: "#2d2a3a", background: "#ffffff" }} />
-                            <button onClick={() => { setGroups(prev => prev.map(gg => gg.id === g.id ? { ...gg, ...editGroupForm } : gg)); setEditingGroupId(null); setEditGroupForm(null); }} style={{
-                              padding: "5px 10px", borderRadius: 8, border: "none",
-                              background: "#e6e6e6", color: "#2d2a3a", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-                            }}>保存</button>
-                          </div>
-                          <button onClick={() => { deleteGroup(g.id); setEditingGroupId(null); setEditGroupForm(null); }} style={{
-                            width: "100%", padding: "6px", borderRadius: 8, border: "1px solid #00000014",
-                            background: "#00000008", color: "#00000066", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-                          }}>このグループを削除</button>
-                        </div>
-                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-          </React.Fragment>
         )}
 
         {/* Data backup / restore */}
