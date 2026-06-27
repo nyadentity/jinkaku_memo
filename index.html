@@ -44,8 +44,10 @@ const IDB_NAME = "jinkaku-sns-db";
 const IDB_STORE = "state";
 const IDB_KEY = "main";
 
+let _dbPromise = null;
 function openDB() {
-  return new Promise((resolve, reject) => {
+  if (_dbPromise) return _dbPromise;
+  _dbPromise = new Promise((resolve, reject) => {
     try {
       const req = indexedDB.open(IDB_NAME, 1);
       req.onupgradeneeded = () => {
@@ -59,6 +61,8 @@ function openDB() {
       reject(err);
     }
   });
+  _dbPromise.catch(() => { _dbPromise = null; });
+  return _dbPromise;
 }
 
 async function idbLoad() {
@@ -113,6 +117,10 @@ async function loadInitialState() {
 
   // 3. Nothing found
   return normalizeState(null);
+}
+
+function uid() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 }
 
 function dateKey(ts) {
@@ -203,7 +211,26 @@ function App() {
 
   useEffect(() => {
     if (!loaded) return;
-    idbSave({ alters, posts, statsOrder }).catch(() => {});
+    const t = setTimeout(() => {
+      idbSave({ alters, posts, statsOrder }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, [alters, posts, statsOrder, loaded]);
+
+  // Flush latest data immediately when the app is hidden/closed (covers the debounce gap)
+  useEffect(() => {
+    if (!loaded) return;
+    const flush = () => {
+      if (document.visibilityState === "hidden") {
+        idbSave({ alters, posts, statsOrder }).catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", flush);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", flush);
+    };
   }, [alters, posts, statsOrder, loaded]);
 
   if (!loaded) {
@@ -316,7 +343,7 @@ function App() {
     if ((!draft.trim() && !draftImage) || !activeAlter) return;
     const tags = draftTags.split(/[,\s、]+/).map(t => t.trim()).filter(Boolean);
     const newPost = {
-      id: Date.now().toString(),
+      id: uid(),
       alterId: activeAlter.id,
       alterName: activeAlter.name,
       alterColor: activeAlter.color,
@@ -435,7 +462,7 @@ function App() {
   function sendReply(postId) {
     if (!replyDraft.trim() || !replyAlter) return;
     const newReply = {
-      id: Date.now().toString(),
+      id: uid(),
       alterId: replyAlter.id,
       alterName: replyAlter.name,
       alterColor: replyAlter.color,
@@ -506,7 +533,7 @@ function App() {
 
   function addAlter() {
     if (!addForm.name.trim()) return;
-    const newAlter = { ...addForm, id: Date.now().toString(), name: addForm.name.trim(), emoji: addForm.emoji.trim() };
+    const newAlter = { ...addForm, id: uid(), name: addForm.name.trim(), emoji: addForm.emoji.trim() };
     setAlters(prev => [...prev, newAlter]);
     if (!activeAlterId) setActiveAlterId(newAlter.id);
     setAddForm({ name: "", emoji: "", color: "#c4b5fd", bio: "" });
@@ -1207,7 +1234,7 @@ function App() {
                     return (
                       <button key={key} onClick={() => setSelectedDate(prev => prev === key ? null : key)} style={{
                         border: "none", borderRadius: 8, padding: "6px 0", cursor: count > 0 ? "pointer" : "default",
-                        background: isSelected ? "#b0aeb5" : count > 0 ? "#00000008" : "transparent",
+                        background: isSelected ? "#c2c2c2" : count > 0 ? "#00000008" : "transparent",
                         color: isSelected ? "#ffffff" : count > 0 ? "#2d2a3a" : "#00000033",
                         fontSize: 12, fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                       }}>
