@@ -141,6 +141,15 @@ function formatTime(ts) {
 const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 function Avatar({ alter, size = 40 }) {
+  if (alter.image) {
+    return (
+      <img src={alter.image} alt={alter.name || ""} style={{
+        width: size, height: size, borderRadius: "50%", objectFit: "cover",
+        border: `2px solid ${alter.color}88`, flexShrink: 0,
+        boxShadow: `0 0 12px ${alter.color}44`, display: "block",
+      }} />
+    );
+  }
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%",
@@ -151,6 +160,148 @@ function Avatar({ alter, size = 40 }) {
       boxShadow: `0 0 12px ${alter.color}44`, overflow: "hidden",
     }}>
       {alter.emoji}
+    </div>
+  );
+}
+
+function CircleCropper({ src, onCancel, onDone }) {
+  const BOX = 280;          // editor viewport size (px)
+  const OUT = 320;          // output image size (px)
+  const imgRef = useRef(null);
+  const [natural, setNatural] = useState({ w: 0, h: 0 });
+  const [scale, setScale] = useState(1);
+  const [minScale, setMinScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const drag = useRef(null);
+  const pinch = useRef(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      const base = Math.max(BOX / img.width, BOX / img.height); // cover
+      setNatural({ w: img.width, h: img.height });
+      setMinScale(base);
+      setScale(base);
+      setOffset({ x: 0, y: 0 });
+      imgRef.current = img;
+    };
+    img.src = src;
+  }, [src]);
+
+  function clampOffset(off, sc) {
+    const dispW = natural.w * sc;
+    const dispH = natural.h * sc;
+    const maxX = Math.max(0, (dispW - BOX) / 2);
+    const maxY = Math.max(0, (dispH - BOX) / 2);
+    return {
+      x: Math.max(-maxX, Math.min(maxX, off.x)),
+      y: Math.max(-maxY, Math.min(maxY, off.y)),
+    };
+  }
+
+  function onPointerDown(e) {
+    if (e.touches && e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinch.current = { dist: Math.hypot(dx, dy), scale };
+      return;
+    }
+    const p = e.touches ? e.touches[0] : e;
+    drag.current = { x: p.clientX, y: p.clientY, ox: offset.x, oy: offset.y };
+  }
+  function onPointerMove(e) {
+    if (pinch.current && e.touches && e.touches.length === 2) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const ns = Math.max(minScale, Math.min(minScale * 5, pinch.current.scale * (dist / pinch.current.dist)));
+      setScale(ns);
+      setOffset(o => clampOffset(o, ns));
+      return;
+    }
+    if (!drag.current) return;
+    if (e.touches) e.preventDefault();
+    const p = e.touches ? e.touches[0] : e;
+    const nx = drag.current.ox + (p.clientX - drag.current.x);
+    const ny = drag.current.oy + (p.clientY - drag.current.y);
+    setOffset(clampOffset({ x: nx, y: ny }, scale));
+  }
+  function onPointerUp() { drag.current = null; pinch.current = null; }
+
+  function handleScaleChange(v) {
+    const ns = Number(v);
+    setScale(ns);
+    setOffset(o => clampOffset(o, ns));
+  }
+
+  function confirm() {
+    const img = imgRef.current;
+    if (!img) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = OUT; canvas.height = OUT;
+    const ctx = canvas.getContext("2d");
+    // map editor coords -> output coords
+    const ratio = OUT / BOX;
+    const dispW = natural.w * scale * ratio;
+    const dispH = natural.h * scale * ratio;
+    const cx = OUT / 2 + offset.x * ratio;
+    const cy = OUT / 2 + offset.y * ratio;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, OUT, OUT);
+    ctx.drawImage(img, cx - dispW / 2, cy - dispH / 2, dispW, dispH);
+    onDone(canvas.toDataURL("image/jpeg", 0.5));
+  }
+
+  const dispW = natural.w * scale;
+  const dispH = natural.h * scale;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "#000000bb", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }}>
+      <div style={{ background: "#fbfaf8", borderRadius: 18, padding: 18, maxWidth: 360, width: "100%" }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#2d2a3a", marginBottom: 4, textAlign: "center" }}>アイコンを調整</div>
+        <div style={{ fontSize: 11, color: "#00000066", marginBottom: 14, textAlign: "center" }}>ドラッグで位置、スライダーで大きさを調整</div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+          <div
+            onMouseDown={onPointerDown} onMouseMove={onPointerMove} onMouseUp={onPointerUp} onMouseLeave={onPointerUp}
+            onTouchStart={onPointerDown} onTouchMove={onPointerMove} onTouchEnd={onPointerUp}
+            style={{
+              position: "relative", width: BOX, height: BOX, borderRadius: 12,
+              overflow: "hidden", background: "#e8e6e2", cursor: "move", touchAction: "none",
+            }}>
+            {natural.w > 0 && (
+              <img src={src} alt="" draggable={false} style={{
+                position: "absolute", userSelect: "none", pointerEvents: "none",
+                width: dispW, height: dispH,
+                left: BOX / 2 - dispW / 2 + offset.x,
+                top: BOX / 2 - dispH / 2 + offset.y,
+              }} />
+            )}
+            {/* circular mask overlay */}
+            <div style={{
+              position: "absolute", inset: 0, pointerEvents: "none",
+              boxShadow: "0 0 0 9999px rgba(255,255,255,0.55)",
+              borderRadius: "50%",
+            }} />
+          </div>
+        </div>
+        <input type="range" min={minScale} max={minScale * 5} step="any" value={scale}
+          onChange={e => handleScaleChange(e.target.value)}
+          style={{ width: "100%", marginBottom: 16, accentColor: "#a89ce0" }} />
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} style={{
+            flex: 1, padding: "10px", borderRadius: 12, border: "1px solid #00000014",
+            background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+          }}>キャンセル</button>
+          <button onClick={confirm} style={{
+            flex: 1, padding: "10px", borderRadius: 12, border: "none",
+            background: "#a89ce0", color: "#ffffff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+          }}>決定</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -179,6 +330,8 @@ function App() {
   const [editPostImage, setEditPostImage] = useState(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null);   // raw image data URL being cropped
+  const [cropCb, setCropCb] = useState(null);     // callback to receive final cropped image
   const [editingReplyKey, setEditingReplyKey] = useState(null); // `${postId}-${replyId}`
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyMenuOpenKey, setReplyMenuOpenKey] = useState(null);
@@ -383,6 +536,23 @@ function App() {
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
+  }
+
+  // Open the in-app circular cropper for an icon image; onDone receives the cropped data URL
+  function openIconCropper(file, onDone) {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropSrc(reader.result);
+      // store callback in a wrapper so setState keeps the function
+      setCropCb(() => onDone);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function closeCropper() {
+    setCropSrc(null);
+    setCropCb(null);
   }
 
   function moveAlter(alterId, dir) {
@@ -624,14 +794,21 @@ function App() {
           background: `${form.color}0f`, border: `1px solid ${form.color}33`,
           display: "flex", alignItems: "center", gap: 12,
         }}>
-          <div style={{
-            width: 46, height: 46, borderRadius: "50%",
-            background: `radial-gradient(circle at 35% 35%, ${form.color}55, ${form.color}22)`,
-            border: `2px solid ${form.color}88`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 22, boxShadow: `0 0 12px ${form.color}44`,
-            color: form.color, fontWeight: 700,
-          }}>{form.emoji}</div>
+          {form.image ? (
+            <img src={form.image} alt="" style={{
+              width: 46, height: 46, borderRadius: "50%", objectFit: "cover",
+              border: `2px solid ${form.color}88`, boxShadow: `0 0 12px ${form.color}44`,
+            }} />
+          ) : (
+            <div style={{
+              width: 46, height: 46, borderRadius: "50%",
+              background: `radial-gradient(circle at 35% 35%, ${form.color}55, ${form.color}22)`,
+              border: `2px solid ${form.color}88`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 22, boxShadow: `0 0 12px ${form.color}44`,
+              color: form.color, fontWeight: 700,
+            }}>{form.emoji}</div>
+          )}
           <div>
             <div style={{ fontWeight: 700, color: form.color, fontSize: 14 }}>{form.name || "名前"}</div>
             <div style={{ fontSize: 11, color: "#00000066" }}>{form.bio || "説明"}</div>
@@ -649,7 +826,37 @@ function App() {
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: "#00000066", marginBottom: 6 }}>アイコン（絵文字・文字を自由入力）</div>
+          <div style={{ fontSize: 12, color: "#00000066", marginBottom: 6 }}>アイコン画像（任意）</div>
+          {form.image ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <img src={form.image} alt="" style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "1px solid #00000018" }} />
+              <label style={{
+                padding: "6px 12px", borderRadius: 14, border: "1px solid #00000018",
+                background: "#ffffff", color: "#00000099", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+              }}>
+                画像を変更
+                <input type="file" accept="image/*" style={{ display: "none" }}
+                  onChange={e => { openIconCropper(e.target.files[0], img => setForm(f => ({ ...f, image: img }))); e.target.value = ""; }} />
+              </label>
+              <button type="button" onClick={() => setForm(f => ({ ...f, image: null }))} style={{
+                padding: "6px 12px", borderRadius: 14, border: "1px solid #00000018",
+                background: "#00000008", color: "#00000066", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+              }}>削除</button>
+            </div>
+          ) : (
+            <label style={{
+              display: "inline-block", padding: "8px 16px", borderRadius: 16, border: "1px solid #00000018",
+              background: "#ffffff", color: "#00000099", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+            }}>
+              画像を選択
+              <input type="file" accept="image/*" style={{ display: "none" }}
+                onChange={e => { openIconCropper(e.target.files[0], img => setForm(f => ({ ...f, image: img }))); e.target.value = ""; }} />
+            </label>
+          )}
+        </div>
+
+        <div style={{ marginBottom: 14, opacity: form.image ? 0.4 : 1 }}>
+          <div style={{ fontSize: 12, color: "#00000066", marginBottom: 6 }}>アイコン（絵文字・文字を自由入力）{form.image && "／画像が優先されます"}</div>
           <input value={form.emoji} onChange={e => setForm(f => ({ ...f, emoji: e.target.value.slice(0, 4) }))}
             style={{ ...inputStyle, fontSize: 18 }} />
         </div>
@@ -680,6 +887,13 @@ function App() {
 
   return (
     <React.Fragment>
+      {cropSrc && (
+        <CircleCropper
+          src={cropSrc}
+          onCancel={closeCropper}
+          onDone={img => { if (cropCb) cropCb(img); closeCropper(); }}
+        />
+      )}
       {/* Header */}
       <div style={{
         padding: "16px 20px", borderBottom: "1px solid #00000010",
