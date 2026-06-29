@@ -38,7 +38,7 @@ const { useState, useEffect, useRef } = React;
 
 const STORAGE_KEY = "jinkaku-sns-v1"; // legacy localStorage key (for migration)
 const PALETTE = ["#a89ce0","#8fbce8","#7fd1bf","#f3a8b8","#f5cf8f","#f3b0d4","#8fd6de","#b3d98f","#f5c19a","#cfa8e0"];
-const DEFAULT_STATS_ORDER = ["yearly", "members", "timeofday"];
+const DEFAULT_STATS_ORDER = ["yearly", "monthly", "members", "timeofday", "weekday"];
 
 const IDB_NAME = "jinkaku-sns-db";
 const IDB_STORE = "state";
@@ -139,6 +139,45 @@ function formatTime(ts) {
 }
 
 const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"];
+
+function PollView({ poll, alters, onVote }) {
+  const votes = poll.votes || {};
+  const total = Object.keys(votes).length;
+  return (
+    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 7 }}>
+      {poll.options.map(opt => {
+        const voters = Object.keys(votes).filter(v => votes[v] === opt.id);
+        const pct = total > 0 ? Math.round(voters.length / total * 100) : 0;
+        return (
+          <div key={opt.id} onClick={onVote ? () => onVote(opt.id) : undefined} style={{ cursor: onVote ? "pointer" : "default" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3, gap: 8 }}>
+              <span style={{ fontSize: 13, color: "#2d2a3a" }}>{opt.text}</span>
+              <span style={{ fontSize: 11, color: "#00000066", whiteSpace: "nowrap" }}>{voters.length}票 {pct}%</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 3, background: "#00000008", overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 3, width: `${pct}%`, background: "#dcdade" }} />
+            </div>
+            {voters.length > 0 && (
+              <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {voters.map(v => {
+                  const va = (alters || []).find(a => a.id === v);
+                  return (
+                    <span key={v} style={{
+                      fontSize: 11, color: "#00000066", background: "#00000006", borderRadius: 10, padding: "1px 8px",
+                    }}>{va ? va.name : "?"}</span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 11, color: "#00000044" }}>
+        計{total}人が投票{onVote ? "・選択肢をタップで投票" : ""}
+      </div>
+    </div>
+  );
+}
 
 function Avatar({ alter, size = 40 }) {
   if (alter.image) {
@@ -328,6 +367,10 @@ function App() {
   const [draft, setDraft] = useState("");
   const [draftTags, setDraftTags] = useState("");
   const [draftImage, setDraftImage] = useState(null);
+  const [quoting, setQuoting] = useState(null); // post being quoted
+  const [pollEnabled, setPollEnabled] = useState(false);
+  const [pollOptions, setPollOptions] = useState(["", ""]);
+  const [votePicker, setVotePicker] = useState(null); // { postId, optionId }
   const [tab, setTab] = useState("timeline"); // timeline | members | data
   const [menuOpen, setMenuOpen] = useState(false);
   const [addForm, setAddForm] = useState({ name: "", emoji: "", color: "#c4b5fd", bio: "" });
@@ -356,6 +399,7 @@ function App() {
   const [selectedMember, setSelectedMember] = useState(null);
   const [imageOnly, setImageOnly] = useState(false);
   const [switchOnly, setSwitchOnly] = useState(false);
+  const [pollOnly, setPollOnly] = useState(false);
   const [memberFilterExpanded, setMemberFilterExpanded] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD"
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -363,6 +407,7 @@ function App() {
     return { y: d.getFullYear(), m: d.getMonth() }; // m: 0-11
   });
   const [statsYear, setStatsYear] = useState(() => new Date().getFullYear());
+  const [statsMonth, setStatsMonth] = useState(() => { const d = new Date(); return d.getFullYear() * 12 + d.getMonth(); }); // months since year 0
   const [statsMenuOpenKey, setStatsMenuOpenKey] = useState(null);
 
   useEffect(() => {
@@ -424,7 +469,7 @@ function App() {
       id: p.id, kind: "post", postId: p.id, replyId: null,
       alterId: p.alterId, alterName: p.alterName, alterColor: p.alterColor, alterEmoji: p.alterEmoji,
       content: p.content, image: p.image || null, tags: p.tags || [], ts: p.ts, bookmarked: !!p.bookmarked,
-      isSwitch: !!p.isSwitch,
+      isSwitch: !!p.isSwitch, hasPoll: !!p.poll, poll: p.poll || null,
     });
     (p.replies || []).forEach(r => {
       allEntries.push({
@@ -454,6 +499,7 @@ function App() {
     if (selectedDate && dateKey(e.ts) !== selectedDate) return false;
     if (imageOnly && !e.image) return false;
     if (switchOnly && !e.isSwitch) return false;
+    if (pollOnly && !e.hasPoll) return false;
     if (q) {
       const alterName = (alters.find(a => a.id === e.alterId) || { name: e.alterName }).name || "";
       const inContent = (e.content || "").toLowerCase().includes(q) || alterName.toLowerCase().includes(q);
@@ -463,7 +509,7 @@ function App() {
     return true;
   });
 
-  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate || imageOnly || switchOnly);
+  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate || imageOnly || switchOnly || pollOnly);
 
   // Year options for the calendar selector: span post years + current + a small margin
   const nowYear = new Date().getFullYear();
@@ -474,10 +520,6 @@ function App() {
   for (let yy = minYear - 1; yy <= maxYear + 1; yy++) calendarYears.push(yy);
 
   // --- Stats derived data ---
-  const statsMinYear = Math.min(nowYear, statsYear, ...(postYears.length ? postYears : [nowYear]));
-  const statsMaxYear = Math.max(nowYear, statsYear, ...(postYears.length ? postYears : [nowYear]));
-  const statsYears = [];
-  for (let yy = statsMinYear - 1; yy <= statsMaxYear + 1; yy++) statsYears.push(yy);
 
   const monthlyCounts = Array.from({ length: 12 }, () => 0);
   allEntries.forEach(e => {
@@ -508,10 +550,31 @@ function App() {
     timeOfDayCounts[idx]++;
   });
 
+  // --- Weekday breakdown (0:Sun ... 6:Sat) ---
+  const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
+  allEntries.forEach(e => {
+    weekdayCounts[new Date(e.ts).getDay()]++;
+  });
+
+  // --- Daily counts for the selected month (for the monthly bar chart) ---
+  const monthlyYear = Math.floor(statsMonth / 12);
+  const monthlyMonth = statsMonth % 12; // 0-11
+  const daysInMonth = new Date(monthlyYear, monthlyMonth + 1, 0).getDate();
+  const dailyCounts = new Array(daysInMonth).fill(0);
+  allEntries.forEach(e => {
+    const d = new Date(e.ts);
+    if (d.getFullYear() === monthlyYear && d.getMonth() === monthlyMonth) {
+      dailyCounts[d.getDate() - 1]++;
+    }
+  });
+  const dailyMax = Math.max(1, ...dailyCounts);
+  const dailyTotal = dailyCounts.reduce((a, b) => a + b, 0);
+  const nowMonthIndex = (() => { const d = new Date(); return d.getFullYear() * 12 + d.getMonth(); })();
+
 
 
   function post() {
-    if ((!draft.trim() && !draftImage) || !activeAlter) return;
+    if ((!draft.trim() && !draftImage && !quoting && !pollEnabled) || !activeAlter) return;
     const tags = draftTags.split(/[,\s、]+/).map(t => t.trim()).filter(Boolean);
     const newPost = {
       id: uid(),
@@ -525,10 +588,25 @@ function App() {
       ts: Date.now(),
       replies: [],
     };
+    if (quoting) {
+      newPost.quoteOf = quoting;
+    }
+    if (pollEnabled) {
+      const opts = pollOptions.map(t => t.trim()).filter(Boolean);
+      if (opts.length >= 2) {
+        newPost.poll = {
+          options: opts.map((text, i) => ({ id: "o" + i, text })),
+          votes: {}, // { alterId: optionId }
+        };
+      }
+    }
     setPosts(prev => [newPost, ...prev]);
     setDraft("");
     setDraftTags("");
     setDraftImage(null);
+    setQuoting(null);
+    setPollEnabled(false);
+    setPollOptions(["", ""]);
   }
 
   function postSwitch() {
@@ -643,6 +721,43 @@ function App() {
 
   function toggleBookmarkPost(postId) {
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, bookmarked: !p.bookmarked } : p));
+  }
+
+  function togglePinPost(postId) {
+    setPosts(prev => prev.map(p => p.id === postId ? { ...p, pinned: !p.pinned } : p));
+    setPostMenuOpenId(null);
+  }
+
+  function votePoll(postId, optionId, voterId) {
+    if (!voterId) return;
+    setPosts(prev => prev.map(p => {
+      if (p.id !== postId || !p.poll) return p;
+      const votes = { ...(p.poll.votes || {}) };
+      if (votes[voterId] === optionId) {
+        delete votes[voterId]; // tapping the same option again removes the vote
+      } else {
+        votes[voterId] = optionId;
+      }
+      return { ...p, poll: { ...p.poll, votes } };
+    }));
+  }
+
+  function startQuote(srcId) {
+    const src = posts.find(p => p.id === srcId);
+    if (!src) return;
+    setQuoting({
+      id: src.id,
+      alterId: src.alterId,
+      alterName: src.alterName,
+      alterColor: src.alterColor,
+      alterEmoji: src.alterEmoji,
+      content: src.content,
+      image: src.image || null,
+      poll: src.poll || null,
+      ts: src.ts,
+    });
+    setPostMenuOpenId(null);
+    window.scrollTo(0, 0);
   }
 
   function toggleBookmarkReply(postId, replyId) {
@@ -950,6 +1065,41 @@ function App() {
           onDone={(img, avg) => { if (cropCb) cropCb(img, avg); closeCropper(); }}
         />
       )}
+      {votePicker && (
+        <div onClick={() => setVotePicker(null)} style={{
+          position: "fixed", inset: 0, background: "#00000066", zIndex: 1000,
+          display: "flex", alignItems: "flex-end", justifyContent: "center",
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#fbfaf8", borderRadius: "18px 18px 0 0", padding: "18px 16px 28px",
+            width: "100%", maxWidth: 480, maxHeight: "70vh", overflowY: "auto",
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#2d2a3a", marginBottom: 4, textAlign: "center" }}>誰として投票しますか？</div>
+            <div style={{ fontSize: 11, color: "#00000055", marginBottom: 14, textAlign: "center" }}>同じ選択肢をもう一度選ぶと取り消せます</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {alters.map(a => {
+                const tp = posts.find(p => p.id === votePicker.postId);
+                const voted = tp && tp.poll && (tp.poll.votes || {})[a.id] === votePicker.optionId;
+                return (
+                  <button key={a.id} onClick={() => { votePoll(votePicker.postId, votePicker.optionId, a.id); setVotePicker(null); }} style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 12,
+                    border: voted ? `1.5px solid ${a.color}` : "1px solid #00000012",
+                    background: voted ? `${a.color}14` : "#ffffff", cursor: "pointer", fontFamily: "inherit",
+                  }}>
+                    <Avatar alter={a} size={32} />
+                    <span style={{ fontSize: 14, color: "#2d2a3a", flex: 1, textAlign: "left" }}>{a.name}</span>
+                    {voted && <span style={{ fontSize: 12, color: a.color }}>投票中</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setVotePicker(null)} style={{
+              marginTop: 14, width: "100%", padding: "10px", borderRadius: 12, border: "1px solid #00000014",
+              background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+            }}>閉じる</button>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div style={{
         padding: "16px 20px", borderBottom: "1px solid #00000010",
@@ -1081,29 +1231,73 @@ function App() {
               }}>×</button>
             </div>
           )}
+          {quoting && (
+            <div style={{ position: "relative", marginTop: 8, border: "none", borderRadius: 12, padding: "10px 12px", background: "#ffffff" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: quoting.alterColor || "#2d2a3a" }}>{quoting.alterName}</span>
+                <span style={{ fontSize: 10, color: "#00000033" }}>{formatDateLabel(dateKey(quoting.ts))} {formatTime(quoting.ts)}</span>
+              </div>
+              {quoting.content && <div style={{ fontSize: 12, lineHeight: 1.5, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{quoting.content}</div>}
+              {quoting.image && <img src={quoting.image} alt="" style={{ maxWidth: "100%", maxHeight: 120, borderRadius: 8, marginTop: 6, display: "block" }} />}
+              {quoting.poll && <PollView poll={quoting.poll} alters={alters} />}
+              <button onClick={() => setQuoting(null)} style={{
+                position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: "50%",
+                border: "none", background: "transparent", color: "#00000033", fontSize: 15, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>×</button>
+            </div>
+          )}
+          {pollEnabled && (
+            <div style={{ marginTop: 8, border: "1px solid #00000014", borderRadius: 12, padding: "10px 12px" }}>
+              <div style={{ fontSize: 12, color: "#00000077", marginBottom: 8 }}>アンケートの選択肢</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {pollOptions.map((opt, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input value={opt} onChange={e => setPollOptions(prev => prev.map((o, j) => j === i ? e.target.value : o))}
+                      placeholder={`選択肢 ${i + 1}`}
+                      style={{ flex: 1, border: "1px solid #00000014", borderRadius: 8, padding: "6px 10px", fontSize: 13, outline: "none", fontFamily: "inherit", color: "#2d2a3a", background: "#ffffff" }} />
+                    {pollOptions.length > 2 && (
+                      <button onClick={() => setPollOptions(prev => prev.filter((_, j) => j !== i))} style={{
+                        border: "none", background: "transparent", color: "#00000044", fontSize: 16, cursor: "pointer", padding: "0 4px",
+                      }}>×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {pollOptions.length < 5 && (
+                <button onClick={() => setPollOptions(prev => [...prev, ""])} style={{
+                  marginTop: 8, fontSize: 12, padding: "4px 10px", borderRadius: 10, border: "1px solid #00000014",
+                  background: "transparent", color: "#00000077", cursor: "pointer", fontFamily: "inherit",
+                }}>＋ 選択肢を追加</button>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-            <label style={{
-              display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-              fontSize: 12, color: "#00000077", marginLeft: 6,
-            }}>
-              <span style={{
-                padding: "4px 10px", borderRadius: 14, border: "1px solid #00000018",
-              }}>画像を追加</span>
-              {draft.length > 0 && <span style={{ color: "#00000044" }}>{draft.length}文字</span>}
-              <input type="file" accept="image/*" style={{ display: "none" }}
-                onChange={e => { handleImageFile(e.target.files[0], setDraftImage); e.target.value = ""; }} />
-            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label style={{
+                display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                fontSize: 12, color: "#00000077", marginLeft: 6,
+              }}>
+                <span style={{ padding: "4px 10px", borderRadius: 14, border: "1px solid #00000018" }}>画像</span>
+                <input type="file" accept="image/*" style={{ display: "none" }}
+                  onChange={e => { handleImageFile(e.target.files[0], setDraftImage); e.target.value = ""; }} />
+              </label>
+              <button onClick={() => setPollEnabled(v => !v)} style={{
+                padding: "4px 10px", borderRadius: 14, fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                border: "1px solid #00000018", background: pollEnabled ? "#00000010" : "transparent", color: "#00000077",
+              }}>アンケート</button>
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={postSwitch} style={{
                 padding: "7px 14px", borderRadius: 20, border: `1px solid ${activeAlter.color}88`,
                 background: "transparent", color: activeAlter.color,
                 fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
               }}>交代</button>
-              <button onClick={post} disabled={!draft.trim() && !draftImage} style={{
+              <button onClick={post} disabled={!draft.trim() && !draftImage && !quoting && !pollEnabled} style={{
                 padding: "7px 18px", borderRadius: 20, border: "none",
-                background: (draft.trim() || draftImage) ? activeAlter.color : "#00000014",
-                color: (draft.trim() || draftImage) ? "#2d2a3a" : "#00000055",
-                fontWeight: 700, fontSize: 13, cursor: (draft.trim() || draftImage) ? "pointer" : "default",
+                background: (draft.trim() || draftImage || quoting || pollEnabled) ? activeAlter.color : "#00000014",
+                color: (draft.trim() || draftImage || quoting || pollEnabled) ? "#2d2a3a" : "#00000055",
+                fontWeight: 700, fontSize: 13, cursor: (draft.trim() || draftImage || quoting || pollEnabled) ? "pointer" : "default",
               }}>投稿</button>
             </div>
           </div>
@@ -1125,7 +1319,7 @@ function App() {
                 まだ投稿がありません。
               </div>
             )}
-            {posts.map(p => {
+            {[...posts].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map(p => {
               const alter = alters.find(a => a.id === p.alterId) || { name: p.alterName, color: p.alterColor, emoji: p.alterEmoji };
               if (p.isSwitch) {
                 const isEditingTime = editingSwitchId === p.id;
@@ -1134,7 +1328,7 @@ function App() {
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ flex: 1, height: 1, background: "#00000012" }} />
                       <span style={{ fontSize: 12, color: alter.color || p.alterColor, fontWeight: 600, whiteSpace: "nowrap" }}>
-                        ⇄ {alter.name || p.alterName} に交代
+                        → {alter.name || p.alterName} に交代
                       </span>
                       <button onClick={() => isEditingTime ? setEditingSwitchId(null) : startEditSwitchTime(p)} style={{
                         border: "none", background: "transparent", color: "#00000055",
@@ -1167,10 +1361,26 @@ function App() {
                 );
               }
               return (
-                <div key={p.id} style={{ padding: "14px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
+                <div key={p.id} style={p.pinned ? {
+                  margin: "8px 12px", padding: "12px 14px", border: "1px solid #e0dee2", borderRadius: 14,
+                  display: "flex", gap: 12, background: "transparent",
+                } : { padding: "14px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
                   <Avatar alter={alter} size={40} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                    {p.pinned && (
+                      <div style={{ fontSize: 11, color: "#00000055", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#00000055" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 17v5" />
+                          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+                        </svg>
+                        固定された投稿
+                      </div>
+                    )}
+                    {p.repostOf && (
+                      <div style={{ fontSize: 11, color: "#00000055", marginBottom: 4 }}>
+                        ⇄ {p.repostOf.alterName} の投稿をリポスト
+                      </div>
+                    )}                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 700, color: alter.color || p.alterColor, fontSize: 14 }}>{alter.name || p.alterName}</span>
                         <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(p.ts))} {formatTime(p.ts)}</span>
@@ -1194,6 +1404,18 @@ function App() {
                                   background: "transparent", color: "#2d2a3a",
                                   padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
                                 }}>{p.bookmarked ? "ブックマーク解除" : "ブックマーク"}</button>
+                                <button onClick={() => togglePinPost(p.id)} style={{
+                                  display: "block", width: "100%", textAlign: "left", border: "none",
+                                  background: "transparent", color: "#2d2a3a",
+                                  padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+                                }}>{p.pinned ? "固定を解除" : "固定する"}</button>
+                                {!p.isSwitch && (
+                                  <button onClick={() => startQuote(p.id)} style={{
+                                    display: "block", width: "100%", textAlign: "left", border: "none",
+                                    background: "transparent", color: "#2d2a3a",
+                                    padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+                                  }}>引用</button>
+                                )}
                                 <button onClick={() => startEditPost(p)} style={{
                                   display: "block", width: "100%", textAlign: "left", border: "none",
                                   background: "transparent", color: "#2d2a3a",
@@ -1281,6 +1503,24 @@ function App() {
                               <span key={t} style={{ fontSize: 11, color: "#00000077", background: "#00000006", borderRadius: 12, padding: "2px 10px" }}>#{t}</span>
                             ))}
                           </div>
+                        )}
+                        {p.quoteOf && (
+                          <div style={{ marginTop: 10, border: "none", borderRadius: 12, padding: "10px 12px", background: "#ffffff" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: p.quoteOf.alterColor || "#2d2a3a" }}>{p.quoteOf.alterName}</span>
+                              <span style={{ fontSize: 10, color: "#00000033" }}>{formatDateLabel(dateKey(p.quoteOf.ts))} {formatTime(p.quoteOf.ts)}</span>
+                            </div>
+                            {p.quoteOf.content && (
+                              <div style={{ fontSize: 13, lineHeight: 1.6, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{p.quoteOf.content}</div>
+                            )}
+                            {p.quoteOf.image && (
+                              <img src={p.quoteOf.image} alt="" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8, marginTop: 6, display: "block" }} />
+                            )}
+                            {p.quoteOf.poll && <PollView poll={p.quoteOf.poll} alters={alters} />}
+                          </div>
+                        )}
+                        {p.poll && (
+                          <PollView poll={p.poll} alters={alters} onVote={optId => setVotePicker({ postId: p.id, optionId: optId })} />
                         )}
                       </React.Fragment>
                     )}
@@ -1494,18 +1734,24 @@ function App() {
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>その他の絞り込み</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={() => setImageOnly(v => !v)} style={{
-                  fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
-                  border: imageOnly ? "1px solid #00000018" : "1px solid #00000012",
-                  background: imageOnly ? "#00000008" : "#ffffff",
-                  color: "#2d2a3a", fontWeight: imageOnly ? 500 : 400,
-                }}>画像つき</button>
                 <button onClick={() => setSwitchOnly(v => !v)} style={{
                   fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
                   border: switchOnly ? "1px solid #00000018" : "1px solid #00000012",
                   background: switchOnly ? "#00000008" : "#ffffff",
                   color: "#2d2a3a", fontWeight: switchOnly ? 500 : 400,
                 }}>交代</button>
+                <button onClick={() => setImageOnly(v => !v)} style={{
+                  fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
+                  border: imageOnly ? "1px solid #00000018" : "1px solid #00000012",
+                  background: imageOnly ? "#00000008" : "#ffffff",
+                  color: "#2d2a3a", fontWeight: imageOnly ? 500 : 400,
+                }}>画像つき</button>
+                <button onClick={() => setPollOnly(v => !v)} style={{
+                  fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
+                  border: pollOnly ? "1px solid #00000018" : "1px solid #00000012",
+                  background: pollOnly ? "#00000008" : "#ffffff",
+                  color: "#2d2a3a", fontWeight: pollOnly ? 500 : 400,
+                }}>アンケート</button>
               </div>
             </div>
 
@@ -1583,10 +1829,11 @@ function App() {
                   return <span style={{ background: `${a.color}26`, borderRadius: 12, padding: "3px 10px" }}>{a.name}</span>;
                 })()}
                 {selectedTag && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>#{selectedTag}</span>}
-                {imageOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>画像つき</span>}
                 {switchOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>交代</span>}
+                {imageOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>画像つき</span>}
+                {pollOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>アンケート</span>}
                 {selectedDate && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>{formatDateLabel(selectedDate)}</span>}
-                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); setImageOnly(false); setSwitchOnly(false); }} style={{
+                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); setImageOnly(false); setSwitchOnly(false); setPollOnly(false); }} style={{
                   border: "none", background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", textDecoration: "underline",
                 }}>クリア</button>
               </div>
@@ -1612,16 +1859,13 @@ function App() {
                         <span style={{ fontSize: 11, color: "#00000044", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>返信</span>
                       )}
                       {e.isSwitch && (
-                        <span style={{ fontSize: 11, color: alter.color || e.alterColor, background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>交代</span>
+                        <span style={{ fontSize: 11, color: "#00000066", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>交代</span>
                       )}
                     </div>
                     {e.kind === "reply" && (
                       <div style={{ fontSize: 11, color: "#00000044", marginBottom: 4, paddingLeft: 8, borderLeft: "2px solid #00000012" }}>
                         {e.parentAlterName} への返信：{(e.parentContent || "").slice(0, 40)}{(e.parentContent || "").length > 40 ? "…" : ""}
                       </div>
-                    )}
-                    {e.isSwitch && (
-                      <div style={{ fontSize: 12, color: "#00000066" }}>このメンバーに交代した記録</div>
                     )}
                     {e.content && (
                       <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{e.content}</div>
@@ -1636,6 +1880,7 @@ function App() {
                         ))}
                       </div>
                     )}
+                    {e.poll && <PollView poll={e.poll} alters={alters} />}
                   </div>
                 </div>
               );
@@ -1705,12 +1950,7 @@ function App() {
                   <button onClick={() => setStatsYear(y => y - 1)} style={{
                     border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
                   }}>‹</button>
-                  <select value={statsYear} onChange={e => setStatsYear(Number(e.target.value))} style={{
-                    fontSize: 13, fontWeight: 400, color: "#2d2a3a", fontFamily: "inherit",
-                    border: "1px solid #00000014", borderRadius: 8, padding: "4px 8px", background: "#ffffff", cursor: "pointer",
-                  }}>
-                    {statsYears.map(yy => <option key={yy} value={yy}>{yy}年</option>)}
-                  </select>
+                  <span style={{ fontSize: 13, color: "#2d2a3a" }}>{statsYear}年</span>
                   <button onClick={() => setStatsYear(y => y + 1)} style={{
                     border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
                   }}>›</button>
@@ -1734,8 +1974,8 @@ function App() {
                     <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
                       {c > 0 && <div style={{ fontSize: 10, color: "#00000066", marginBottom: 2 }}>{c}</div>}
                       <div style={{
-                        width: 8, borderRadius: 4,
-                        background: c > 0 ? "#b0aeb5" : "#00000008",
+                        width: 6, borderRadius: 3,
+                        background: c > 0 ? "#dcdade" : "#00000008",
                         height: `${Math.max(c > 0 ? 8 : 2, (c / maxMonthlyCount) * 110)}px`,
                       }} />
                     </div>
@@ -1745,6 +1985,54 @@ function App() {
                   {monthlyCounts.map((c, i) => (
                     <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "#00000044" }}>{i + 1}月</div>
                   ))}
+                </div>
+              </div>
+            ),
+
+            monthly: (
+              <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <button onClick={() => setStatsMonth(m => m - 1)} style={{
+                    border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
+                  }}>‹</button>
+                  <span style={{ fontSize: 13, color: "#2d2a3a" }}>{monthlyYear}年{monthlyMonth + 1}月</span>
+                  <button onClick={() => setStatsMonth(m => m + 1)} style={{
+                    border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
+                  }}>›</button>
+                </div>
+                {statsMonth !== nowMonthIndex && (
+                  <div style={{ textAlign: "center", marginBottom: 6 }}>
+                    <button onClick={() => setStatsMonth(nowMonthIndex)} style={{
+                      border: "1px solid #00000014", background: "#ffffff", color: "#00000088",
+                      fontSize: 11, borderRadius: 12, padding: "3px 12px", cursor: "pointer", fontFamily: "inherit",
+                    }}>今月へ</button>
+                  </div>
+                )}
+
+                <div style={{ fontSize: 12, color: "#00000066", margin: "10px 0 14px", textAlign: "center" }}>
+                  日別の投稿数（全{dailyTotal}件・返信含む）
+                </div>
+
+                {/* Daily bar chart */}
+                <div style={{ overflowX: "auto" }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 130, minWidth: daysInMonth * 12 }}>
+                    {dailyCounts.map((c, i) => (
+                      <div key={i} style={{ flex: 1, minWidth: 7, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                        <div style={{
+                          width: 6, borderRadius: 3,
+                          background: c > 0 ? "#dcdade" : "#00000008",
+                          height: `${Math.max(c > 0 ? 6 : 2, (c / dailyMax) * 104)}px`,
+                        }} />
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 3, marginTop: 4, minWidth: daysInMonth * 12 }}>
+                    {dailyCounts.map((c, i) => (
+                      <div key={i} style={{ flex: 1, minWidth: 7, textAlign: "center", fontSize: 8, color: "#00000044" }}>
+                        {(i + 1) % 5 === 0 || i === 0 ? (i + 1) : ""}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ),
@@ -1766,7 +2054,7 @@ function App() {
                           </span>
                         </div>
                         <div style={{ height: 6, borderRadius: 3, background: "#00000008", overflow: "hidden" }}>
-                          <div style={{ height: "100%", borderRadius: 3, background: "#b0aeb5", width: `${(count / maxMemberCount) * 100}%` }} />
+                          <div style={{ height: "100%", borderRadius: 3, background: "#dcdade", width: `${(count / maxMemberCount) * 100}%` }} />
                         </div>
                       </div>
                     </div>
@@ -1776,42 +2064,12 @@ function App() {
             ) : null,
 
             timeofday: (function () {
-              const TIME_COLORS = ["#f5d166", "#a9ddf0", "#6fa3e0", "#3f5fb0"];
               const SHORT_TIME_LABELS = ["朝（5〜11時）", "昼（11〜17時）", "夜（17〜23時）", "深夜（23〜5時）"];
               const total = timeOfDayCounts.reduce((a, b) => a + b, 0);
-              const R = 60, C = 2 * Math.PI * R;
-              let acc = 0;
-              const segments = timeOfDayCounts.map((c, i) => {
-                const frac = total > 0 ? c / total : 0;
-                const seg = {
-                  color: TIME_COLORS[i],
-                  dasharray: `${frac * C} ${C - frac * C}`,
-                  dashoffset: -acc * C,
-                };
-                acc += frac;
-                return seg;
-              });
               return (
                 <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
                   <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
-                    時間帯別の投稿傾向（返信含む）
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-                    <svg width="140" height="140" viewBox="0 0 140 140">
-                      {total === 0 ? (
-                        <circle cx="70" cy="70" r={R} fill="none" stroke="#00000008" strokeWidth="10" />
-                      ) : (
-                        <g transform="rotate(-90 70 70)">
-                          {segments.map((s, i) => s.dasharray.split(" ")[0] !== "0" && (
-                            <circle key={i} cx="70" cy="70" r={R} fill="none" stroke={s.color} strokeWidth="10"
-                              strokeDasharray={s.dasharray} strokeDashoffset={s.dashoffset} />
-                          ))}
-                        </g>
-                      )}
-                      <text x="70" y="74" textAnchor="middle" fontSize="14" fill="#00000066" fontFamily="inherit">
-                        {total}件
-                      </text>
-                    </svg>
+                    時間帯別の投稿傾向（全{total}件・返信含む）
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {SHORT_TIME_LABELS.map((l, i) => {
@@ -1820,10 +2078,38 @@ function App() {
                         <div key={l}>
                           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                             <span style={{ fontSize: 12, color: "#2d2a3a" }}>{l}</span>
-                            <span style={{ fontSize: 11, color: "#00000066" }}>{pct}%</span>
+                            <span style={{ fontSize: 11, color: "#00000066" }}>{timeOfDayCounts[i]}件（{pct}%）</span>
                           </div>
                           <div style={{ height: 6, borderRadius: 3, background: "#00000008", overflow: "hidden" }}>
-                            <div style={{ height: "100%", borderRadius: 3, background: TIME_COLORS[i], opacity: 0.8, width: `${pct}%` }} />
+                            <div style={{ height: "100%", borderRadius: 3, background: "#dcdade", width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })(),
+            weekday: (function () {
+              const WD_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+              const wTotal = weekdayCounts.reduce((a, b) => a + b, 0);
+              const wMax = Math.max(1, ...weekdayCounts);
+              return (
+                <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
+                  <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
+                    曜日別の投稿傾向（全{wTotal}件・返信含む）
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {WD_LABELS.map((l, i) => {
+                      const pct = wTotal > 0 ? Math.round(weekdayCounts[i] / wTotal * 100) : 0;
+                      return (
+                        <div key={l}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                            <span style={{ fontSize: 12, color: "#2d2a3a" }}>{l}曜日</span>
+                            <span style={{ fontSize: 11, color: "#00000066" }}>{weekdayCounts[i]}件（{pct}%）</span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: "#00000008", overflow: "hidden" }}>
+                            <div style={{ height: "100%", borderRadius: 3, background: "#dcdade", width: `${(weekdayCounts[i] / wMax) * 100}%` }} />
                           </div>
                         </div>
                       );
