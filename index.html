@@ -343,6 +343,8 @@ function App() {
   const [editPostImage, setEditPostImage] = useState(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [editingSwitchId, setEditingSwitchId] = useState(null);
+  const [switchTsDraft, setSwitchTsDraft] = useState("");
   const [cropSrc, setCropSrc] = useState(null);   // raw image data URL being cropped
   const [cropCb, setCropCb] = useState(null);     // callback to receive final cropped image
   const [editingReplyKey, setEditingReplyKey] = useState(null); // `${postId}-${replyId}`
@@ -545,6 +547,26 @@ function App() {
       isSwitch: true,
     };
     setPosts(prev => [newPost, ...prev]);
+  }
+
+  function tsToLocalInput(ts) {
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function startEditSwitchTime(p) {
+    setEditingSwitchId(p.id);
+    setSwitchTsDraft(tsToLocalInput(p.ts));
+  }
+
+  function saveSwitchTime(postId) {
+    const t = new Date(switchTsDraft).getTime();
+    if (!isNaN(t)) {
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, ts: t } : p).sort((a, b) => b.ts - a.ts));
+    }
+    setEditingSwitchId(null);
+    setSwitchTsDraft("");
   }
 
   function handleImageFile(file, setter) {
@@ -1106,18 +1128,41 @@ function App() {
             {posts.map(p => {
               const alter = alters.find(a => a.id === p.alterId) || { name: p.alterName, color: p.alterColor, emoji: p.alterEmoji };
               if (p.isSwitch) {
+                const isEditingTime = editingSwitchId === p.id;
                 return (
-                  <div key={p.id} style={{ padding: "10px 16px", borderBottom: "1px solid #00000006", display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ flex: 1, height: 1, background: "#00000012" }} />
-                    <span style={{ fontSize: 12, color: alter.color || p.alterColor, fontWeight: 600, whiteSpace: "nowrap" }}>
-                      ⇄ {alter.name || p.alterName} に交代
-                    </span>
-                    <span style={{ fontSize: 11, color: "#00000033", whiteSpace: "nowrap" }}>{formatTime(p.ts)}</span>
-                    <button onClick={() => deletePost(p.id)} aria-label="削除" style={{
-                      border: "none", background: "transparent", color: "#00000033",
-                      fontSize: 16, cursor: "pointer", padding: "0 2px", lineHeight: 1,
-                    }}>×</button>
-                    <div style={{ flex: 1, height: 1, background: "#00000012" }} />
+                  <div key={p.id} style={{ padding: "10px 16px", borderBottom: "1px solid #00000006" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ flex: 1, height: 1, background: "#00000012" }} />
+                      <span style={{ fontSize: 12, color: alter.color || p.alterColor, fontWeight: 600, whiteSpace: "nowrap" }}>
+                        ⇄ {alter.name || p.alterName} に交代
+                      </span>
+                      <button onClick={() => isEditingTime ? setEditingSwitchId(null) : startEditSwitchTime(p)} style={{
+                        border: "none", background: "transparent", color: "#00000055",
+                        fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                        textDecoration: "underline", textDecorationColor: "#00000022", padding: 0,
+                      }}>{formatDateLabel(dateKey(p.ts))} {formatTime(p.ts)}</button>
+                      <button onClick={() => deletePost(p.id)} aria-label="削除" style={{
+                        border: "none", background: "transparent", color: "#00000033",
+                        fontSize: 16, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                      }}>×</button>
+                      <div style={{ flex: 1, height: 1, background: "#00000012" }} />
+                    </div>
+                    {isEditingTime && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
+                        <input type="datetime-local" value={switchTsDraft} onChange={e => setSwitchTsDraft(e.target.value)} style={{
+                          fontSize: 12, border: "1px solid #00000018", borderRadius: 8, padding: "4px 8px",
+                          color: "#2d2a3a", fontFamily: "inherit", background: "#ffffff",
+                        }} />
+                        <button onClick={() => saveSwitchTime(p.id)} style={{
+                          fontSize: 12, padding: "5px 12px", borderRadius: 10, border: "none",
+                          background: "#e6e6e6", color: "#2d2a3a", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                        }}>保存</button>
+                        <button onClick={() => { setEditingSwitchId(null); setSwitchTsDraft(""); }} style={{
+                          fontSize: 12, padding: "5px 12px", borderRadius: 10, border: "1px solid #00000014",
+                          background: "transparent", color: "#00000077", cursor: "pointer", fontFamily: "inherit",
+                        }}>キャンセル</button>
+                      </div>
+                    )}
                   </div>
                 );
               }
