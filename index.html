@@ -1107,7 +1107,7 @@ function App() {
         position: "sticky", top: 0, zIndex: 20,
         display: "flex", alignItems: "center", gap: 12,
       }}>
-        <div style={{ flex: 1 }}>
+        <div onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{ flex: 1, cursor: "pointer" }}>
           <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: "0.05em" }}>
             {tab === "members" ? "メンバー" : tab === "data" ? "バックアップ/概要" : tab === "search" ? "検索" : tab === "stats" ? "統計" : tab === "bookmarks" ? "ブックマーク" : "人格メモ"}
           </div>
@@ -1129,7 +1129,7 @@ function App() {
                 boxShadow: "0 8px 24px #00000022", overflow: "hidden", minWidth: 160,
               }}>
                 {[["timeline", "タイムライン"], ["members", "メンバー"], ["search", "検索"], ["stats", "統計"], ["bookmarks", "ブックマーク"], ["data", "バックアップ/概要"]].map(([k, l]) => (
-                  <button key={k} onClick={() => { setTab(k); setMenuOpen(false); }} style={{
+                  <button key={k} onClick={() => { setTab(k); setMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={{
                     display: "block", width: "100%", textAlign: "left", border: "none",
                     background: tab === k ? "#00000008" : "transparent",
                     color: "#2d2a3a",
@@ -1803,14 +1803,14 @@ function App() {
                     const isSelected = selectedDate === key;
                     return (
                       <button key={key} onClick={() => setSelectedDate(prev => prev === key ? null : key)} style={{
-                        border: "none", borderRadius: 8, padding: "6px 0", cursor: count > 0 ? "pointer" : "default",
-                        background: isSelected ? "#c2c2c2" : count > 0 ? "#00000008" : "transparent",
-                        color: isSelected ? "#ffffff" : count > 0 ? "#2d2a3a" : "#00000033",
+                        border: isSelected ? "1px solid #00000018" : "1px solid transparent", borderRadius: 8, padding: "6px 0", cursor: count > 0 ? "pointer" : "default",
+                        background: isSelected ? "#ffffff" : count > 0 ? "#00000008" : "transparent",
+                        color: count > 0 || isSelected ? "#2d2a3a" : "#00000033",
                         fontSize: 12, fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                       }}>
                         <span>{day}</span>
                         {count > 0 && <span style={{ alignSelf: "stretch", height: 1, background: "#00000018", marginLeft: 6, marginRight: 6 }} />}
-                        {count > 0 && <span style={{ fontSize: 9, color: isSelected ? "#ffffff" : "#9b99a0" }}>{count}件</span>}
+                        {count > 0 && <span style={{ fontSize: 9, color: "#9b99a0" }}>{count}件</span>}
                       </button>
                     );
                   })}
@@ -1856,7 +1856,7 @@ function App() {
                       <span style={{ fontWeight: 700, color: alter.color || e.alterColor, fontSize: 13 }}>{alter.name || e.alterName}</span>
                       <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(e.ts))} {formatTime(e.ts)}</span>
                       {e.kind === "reply" && (
-                        <span style={{ fontSize: 11, color: "#00000044", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>返信</span>
+                        <span style={{ fontSize: 11, color: "#00000066", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>返信</span>
                       )}
                       {e.isSwitch && (
                         <span style={{ fontSize: 11, color: "#00000066", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>交代</span>
@@ -1909,7 +1909,7 @@ function App() {
                       <span style={{ fontWeight: 700, color: alter.color || e.alterColor, fontSize: 13 }}>{alter.name || e.alterName}</span>
                       <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(e.ts))} {formatTime(e.ts)}</span>
                       {e.kind === "reply" && (
-                        <span style={{ fontSize: 11, color: "#00000044", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>返信</span>
+                        <span style={{ fontSize: 11, color: "#00000066", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>返信</span>
                       )}
                     </div>
                     {e.kind === "reply" && (
@@ -1965,7 +1965,7 @@ function App() {
                 )}
 
                 <div style={{ fontSize: 12, color: "#00000066", margin: "10px 0 14px", textAlign: "center" }}>
-                  {statsYear}年の投稿数（全{yearTotal}件・返信含む）
+                  {statsYear}年の投稿数（全{yearTotal}件）
                 </div>
 
                 {/* Bar chart */}
@@ -2010,7 +2010,7 @@ function App() {
                 )}
 
                 <div style={{ fontSize: 12, color: "#00000066", margin: "10px 0 14px", textAlign: "center" }}>
-                  日別の投稿数（全{dailyTotal}件・返信含む）
+                  日別の投稿数（全{dailyTotal}件）
                 </div>
 
                 {/* Daily bar chart */}
@@ -2040,7 +2040,7 @@ function App() {
             members: memberCounts.length > 0 ? (
               <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
                 <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
-                  メンバー別の投稿割合（全{memberTotal}件・返信含む）
+                  メンバー別の投稿割合（全{memberTotal}件）
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {memberCounts.map(({ alter: a, count }) => (
@@ -2069,7 +2069,7 @@ function App() {
               return (
                 <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
                   <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
-                    時間帯別の投稿傾向（全{total}件・返信含む）
+                    時間帯別の投稿傾向（全{total}件）
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {SHORT_TIME_LABELS.map((l, i) => {
@@ -2097,7 +2097,7 @@ function App() {
               return (
                 <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "14px 12px" }}>
                   <div style={{ fontSize: 12, color: "#00000066", marginBottom: 14, textAlign: "center" }}>
-                    曜日別の投稿傾向（全{wTotal}件・返信含む）
+                    曜日別の投稿傾向（全{wTotal}件）
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {WD_LABELS.map((l, i) => {
