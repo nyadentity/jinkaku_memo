@@ -142,10 +142,11 @@ const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 function Avatar({ alter, size = 40 }) {
   if (alter.image) {
+    const glow = alter.imageColor || alter.color;
     return (
       <img src={alter.image} alt={alter.name || ""} style={{
         width: size, height: size, borderRadius: "50%", objectFit: "cover",
-        flexShrink: 0, display: "block",
+        flexShrink: 0, display: "block", boxShadow: `0 0 12px ${glow}66`,
       }} />
     );
   }
@@ -249,7 +250,20 @@ function CircleCropper({ src, onCancel, onDone }) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, OUT, OUT);
     ctx.drawImage(img, cx - dispW / 2, cy - dispH / 2, dispW, dispH);
-    onDone(canvas.toDataURL("image/jpeg", 0.5));
+    // Compute average color (for the glow behind the avatar)
+    let avg = null;
+    try {
+      const data = ctx.getImageData(0, 0, OUT, OUT).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < data.length; i += 40) { // sample every ~10 pixels
+        r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+      }
+      if (n > 0) {
+        const hex = c => Math.round(c / n).toString(16).padStart(2, "0");
+        avg = "#" + hex(r) + hex(g) + hex(b);
+      }
+    } catch {}
+    onDone(canvas.toDataURL("image/jpeg", 0.5), avg);
   }
 
   const dispW = natural.w * scale;
@@ -339,6 +353,7 @@ function App() {
   const [selectedTag, setSelectedTag] = useState(null);
   const [selectedMember, setSelectedMember] = useState(null);
   const [imageOnly, setImageOnly] = useState(false);
+  const [switchOnly, setSwitchOnly] = useState(false);
   const [memberFilterExpanded, setMemberFilterExpanded] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD"
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -407,6 +422,7 @@ function App() {
       id: p.id, kind: "post", postId: p.id, replyId: null,
       alterId: p.alterId, alterName: p.alterName, alterColor: p.alterColor, alterEmoji: p.alterEmoji,
       content: p.content, image: p.image || null, tags: p.tags || [], ts: p.ts, bookmarked: !!p.bookmarked,
+      isSwitch: !!p.isSwitch,
     });
     (p.replies || []).forEach(r => {
       allEntries.push({
@@ -435,6 +451,7 @@ function App() {
     if (selectedMember && e.alterId !== selectedMember) return false;
     if (selectedDate && dateKey(e.ts) !== selectedDate) return false;
     if (imageOnly && !e.image) return false;
+    if (switchOnly && !e.isSwitch) return false;
     if (q) {
       const alterName = (alters.find(a => a.id === e.alterId) || { name: e.alterName }).name || "";
       const inContent = (e.content || "").toLowerCase().includes(q) || alterName.toLowerCase().includes(q);
@@ -444,7 +461,7 @@ function App() {
     return true;
   });
 
-  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate || imageOnly);
+  const hasActiveFilter = !!(q || selectedTag || selectedMember || selectedDate || imageOnly || switchOnly);
 
   // Year options for the calendar selector: span post years + current + a small margin
   const nowYear = new Date().getFullYear();
@@ -510,6 +527,24 @@ function App() {
     setDraft("");
     setDraftTags("");
     setDraftImage(null);
+  }
+
+  function postSwitch() {
+    if (!activeAlter) return;
+    const newPost = {
+      id: uid(),
+      alterId: activeAlter.id,
+      alterName: activeAlter.name,
+      alterColor: activeAlter.color,
+      alterEmoji: activeAlter.emoji,
+      content: "",
+      image: null,
+      tags: [],
+      ts: Date.now(),
+      replies: [],
+      isSwitch: true,
+    };
+    setPosts(prev => [newPost, ...prev]);
   }
 
   function handleImageFile(file, setter) {
@@ -796,6 +831,7 @@ function App() {
           {form.image ? (
             <img src={form.image} alt="" style={{
               width: 46, height: 46, borderRadius: "50%", objectFit: "cover",
+              boxShadow: `0 0 12px ${(form.imageColor || form.color)}66`,
             }} />
           ) : (
             <div style={{
@@ -834,9 +870,9 @@ function App() {
               }}>
                 画像を変更
                 <input type="file" accept="image/*" style={{ display: "none" }}
-                  onChange={e => { openIconCropper(e.target.files[0], img => setForm(f => ({ ...f, image: img }))); e.target.value = ""; }} />
+                  onChange={e => { openIconCropper(e.target.files[0], (img, avg) => setForm(f => ({ ...f, image: img, imageColor: avg }))); e.target.value = ""; }} />
               </label>
-              <button type="button" onClick={() => setForm(f => ({ ...f, image: null }))} style={{
+              <button type="button" onClick={() => setForm(f => ({ ...f, image: null, imageColor: null }))} style={{
                 padding: "6px 12px", borderRadius: 14, border: "1px solid #00000018",
                 background: "#00000008", color: "#00000066", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
               }}>削除</button>
@@ -848,7 +884,7 @@ function App() {
             }}>
               画像を選択
               <input type="file" accept="image/*" style={{ display: "none" }}
-                onChange={e => { openIconCropper(e.target.files[0], img => setForm(f => ({ ...f, image: img }))); e.target.value = ""; }} />
+                onChange={e => { openIconCropper(e.target.files[0], (img, avg) => setForm(f => ({ ...f, image: img, imageColor: avg }))); e.target.value = ""; }} />
             </label>
           )}
         </div>
@@ -889,7 +925,7 @@ function App() {
         <CircleCropper
           src={cropSrc}
           onCancel={closeCropper}
-          onDone={img => { if (cropCb) cropCb(img); closeCropper(); }}
+          onDone={(img, avg) => { if (cropCb) cropCb(img, avg); closeCropper(); }}
         />
       )}
       {/* Header */}
@@ -1035,12 +1071,19 @@ function App() {
               <input type="file" accept="image/*" style={{ display: "none" }}
                 onChange={e => { handleImageFile(e.target.files[0], setDraftImage); e.target.value = ""; }} />
             </label>
-            <button onClick={post} disabled={!draft.trim() && !draftImage} style={{
-              padding: "7px 18px", borderRadius: 20, border: "none",
-              background: (draft.trim() || draftImage) ? activeAlter.color : "#00000014",
-              color: (draft.trim() || draftImage) ? "#2d2a3a" : "#00000055",
-              fontWeight: 700, fontSize: 13, cursor: (draft.trim() || draftImage) ? "pointer" : "default",
-            }}>投稿</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={postSwitch} style={{
+                padding: "7px 14px", borderRadius: 20, border: `1px solid ${activeAlter.color}88`,
+                background: "transparent", color: activeAlter.color,
+                fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+              }}>交代</button>
+              <button onClick={post} disabled={!draft.trim() && !draftImage} style={{
+                padding: "7px 18px", borderRadius: 20, border: "none",
+                background: (draft.trim() || draftImage) ? activeAlter.color : "#00000014",
+                color: (draft.trim() || draftImage) ? "#2d2a3a" : "#00000055",
+                fontWeight: 700, fontSize: 13, cursor: (draft.trim() || draftImage) ? "pointer" : "default",
+              }}>投稿</button>
+            </div>
           </div>
         </div>
       ) : (
@@ -1062,6 +1105,22 @@ function App() {
             )}
             {posts.map(p => {
               const alter = alters.find(a => a.id === p.alterId) || { name: p.alterName, color: p.alterColor, emoji: p.alterEmoji };
+              if (p.isSwitch) {
+                return (
+                  <div key={p.id} style={{ padding: "10px 16px", borderBottom: "1px solid #00000006", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1, height: 1, background: "#00000012" }} />
+                    <span style={{ fontSize: 12, color: alter.color || p.alterColor, fontWeight: 600, whiteSpace: "nowrap" }}>
+                      ⇄ {alter.name || p.alterName} に交代
+                    </span>
+                    <span style={{ fontSize: 11, color: "#00000033", whiteSpace: "nowrap" }}>{formatTime(p.ts)}</span>
+                    <button onClick={() => deletePost(p.id)} aria-label="削除" style={{
+                      border: "none", background: "transparent", color: "#00000033",
+                      fontSize: 16, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+                    }}>×</button>
+                    <div style={{ flex: 1, height: 1, background: "#00000012" }} />
+                  </div>
+                );
+              }
               return (
                 <div key={p.id} style={{ padding: "14px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
                   <Avatar alter={alter} size={40} />
@@ -1389,12 +1448,20 @@ function App() {
             {/* Image filter */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>その他の絞り込み</div>
-              <button onClick={() => setImageOnly(v => !v)} style={{
-                fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
-                border: imageOnly ? "1px solid #00000018" : "1px solid #00000012",
-                background: imageOnly ? "#00000008" : "#ffffff",
-                color: "#2d2a3a", fontWeight: imageOnly ? 500 : 400,
-              }}>画像つき</button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => setImageOnly(v => !v)} style={{
+                  fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
+                  border: imageOnly ? "1px solid #00000018" : "1px solid #00000012",
+                  background: imageOnly ? "#00000008" : "#ffffff",
+                  color: "#2d2a3a", fontWeight: imageOnly ? 500 : 400,
+                }}>画像つき</button>
+                <button onClick={() => setSwitchOnly(v => !v)} style={{
+                  fontSize: 12, borderRadius: 14, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit",
+                  border: switchOnly ? "1px solid #00000018" : "1px solid #00000012",
+                  background: switchOnly ? "#00000008" : "#ffffff",
+                  color: "#2d2a3a", fontWeight: switchOnly ? 500 : 400,
+                }}>交代</button>
+              </div>
             </div>
 
             {/* Calendar */}
@@ -1472,8 +1539,9 @@ function App() {
                 })()}
                 {selectedTag && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>#{selectedTag}</span>}
                 {imageOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>画像つき</span>}
+                {switchOnly && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>交代</span>}
                 {selectedDate && <span style={{ background: "#00000008", borderRadius: 12, padding: "3px 10px" }}>{formatDateLabel(selectedDate)}</span>}
-                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); setImageOnly(false); }} style={{
+                <button onClick={() => { setSearchQuery(""); setSelectedTag(null); setSelectedMember(null); setSelectedDate(null); setImageOnly(false); setSwitchOnly(false); }} style={{
                   border: "none", background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", textDecoration: "underline",
                 }}>クリア</button>
               </div>
@@ -1498,11 +1566,17 @@ function App() {
                       {e.kind === "reply" && (
                         <span style={{ fontSize: 11, color: "#00000044", background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>返信</span>
                       )}
+                      {e.isSwitch && (
+                        <span style={{ fontSize: 11, color: alter.color || e.alterColor, background: "#00000006", borderRadius: 10, padding: "1px 8px" }}>交代</span>
+                      )}
                     </div>
                     {e.kind === "reply" && (
                       <div style={{ fontSize: 11, color: "#00000044", marginBottom: 4, paddingLeft: 8, borderLeft: "2px solid #00000012" }}>
                         {e.parentAlterName} への返信：{(e.parentContent || "").slice(0, 40)}{(e.parentContent || "").length > 40 ? "…" : ""}
                       </div>
+                    )}
+                    {e.isSwitch && (
+                      <div style={{ fontSize: 12, color: "#00000066" }}>このメンバーに交代した記録</div>
                     )}
                     {e.content && (
                       <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{e.content}</div>
