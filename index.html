@@ -638,10 +638,19 @@ function App() {
     setSwitchTsDraft(tsToLocalInput(p.ts));
   }
 
+  function parseLocalInput(s) {
+    // datetime-local value: "YYYY-MM-DDTHH:MM" (seconds optional). iOS Safari fails
+    // to parse this via new Date(), so build the Date from parts manually.
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s || "");
+    if (!m) return NaN;
+    const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0);
+    return d.getTime();
+  }
+
   function saveSwitchTime(postId) {
-    const t = new Date(switchTsDraft).getTime();
+    const t = parseLocalInput(switchTsDraft);
     if (!isNaN(t)) {
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, ts: t } : p).sort((a, b) => b.ts - a.ts));
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, ts: t } : p));
     }
     setEditingSwitchId(null);
     setSwitchTsDraft("");
@@ -1319,7 +1328,7 @@ function App() {
                 まだ投稿がありません。
               </div>
             )}
-            {[...posts].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map(p => {
+            {[...posts].sort((a, b) => ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) || (b.ts - a.ts)).map(p => {
               const alter = alters.find(a => a.id === p.alterId) || { name: p.alterName, color: p.alterColor, emoji: p.alterEmoji };
               if (p.isSwitch) {
                 const isEditingTime = editingSwitchId === p.id;
@@ -1335,26 +1344,26 @@ function App() {
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
                         textDecoration: "underline", textDecorationColor: "#00000022", padding: 0,
                       }}>{formatDateLabel(dateKey(p.ts))} {formatTime(p.ts)}</button>
-                      <button onClick={() => deletePost(p.id)} aria-label="削除" style={{
-                        border: "none", background: "transparent", color: "#00000033",
-                        fontSize: 16, cursor: "pointer", padding: "0 2px", lineHeight: 1,
-                      }}>×</button>
                       <div style={{ flex: 1, height: 1, background: "#00000012" }} />
                     </div>
                     {isEditingTime && (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                         <input type="datetime-local" value={switchTsDraft} onChange={e => setSwitchTsDraft(e.target.value)} style={{
                           fontSize: 12, border: "1px solid #00000018", borderRadius: 8, padding: "4px 8px",
                           color: "#2d2a3a", fontFamily: "inherit", background: "#ffffff",
                         }} />
-                        <button onClick={() => saveSwitchTime(p.id)} style={{
-                          fontSize: 12, padding: "5px 12px", borderRadius: 10, border: "none",
-                          background: "#e6e6e6", color: "#2d2a3a", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                        }}>保存</button>
+                        <button onClick={() => { setEditingSwitchId(null); setSwitchTsDraft(""); deletePost(p.id); }} style={{
+                          fontSize: 12, padding: "5px 12px", borderRadius: 10, border: "1px solid #00000014",
+                          background: "transparent", color: "#00000066", cursor: "pointer", fontFamily: "inherit",
+                        }}>削除</button>
                         <button onClick={() => { setEditingSwitchId(null); setSwitchTsDraft(""); }} style={{
                           fontSize: 12, padding: "5px 12px", borderRadius: 10, border: "1px solid #00000014",
                           background: "transparent", color: "#00000077", cursor: "pointer", fontFamily: "inherit",
                         }}>キャンセル</button>
+                        <button onClick={() => saveSwitchTime(p.id)} style={{
+                          fontSize: 12, padding: "5px 12px", borderRadius: 10, border: "none",
+                          background: "#e6e6e6", color: "#2d2a3a", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                        }}>保存</button>
                       </div>
                     )}
                   </div>
@@ -1421,11 +1430,6 @@ function App() {
                                   background: "transparent", color: "#2d2a3a",
                                   padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
                                 }}>編集</button>
-                                <button onClick={() => { setPostMenuOpenId(null); deletePost(p.id); }} style={{
-                                  display: "block", width: "100%", textAlign: "left", border: "none",
-                                  background: "transparent", color: "#2d2a3a",
-                                  padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
-                                }}>削除</button>
                               </div>
                             </React.Fragment>
                           )}
@@ -1478,6 +1482,10 @@ function App() {
                               onChange={e => { handleImageFile(e.target.files[0], setEditPostImage); e.target.value = ""; }} />
                           </label>
                           <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={() => { cancelEditPost(); deletePost(p.id); }} style={{
+                              padding: "6px 14px", borderRadius: 16, border: "1px solid #00000014",
+                              background: "transparent", color: "#00000066", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                            }}>削除</button>
                             <button onClick={cancelEditPost} style={{
                               padding: "6px 14px", borderRadius: 16, border: "1px solid #00000014",
                               background: "transparent", color: "#00000077", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
