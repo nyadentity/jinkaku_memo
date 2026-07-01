@@ -188,18 +188,18 @@ function Avatar({ alter, size = 40 }) {
     return (
       <img src={alter.image} alt={alter.name || ""} style={{
         width: size, height: size, borderRadius: "50%", objectFit: "cover",
-        flexShrink: 0, display: "block", boxShadow: `0 0 12px ${glow}66`,
+        flexShrink: 0, display: "block", boxShadow: `0 0 12px ${glow}55`,
       }} />
     );
   }
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%",
-      background: `radial-gradient(circle at 35% 35%, ${alter.color}55, ${alter.color}22)`,
+      background: `${alter.color}33`,
       border: `2px solid ${alter.color}88`,
       display: "flex", alignItems: "center", justifyContent: "center",
       fontSize: size * 0.45, flexShrink: 0, color: `${alter.color}cc`, fontWeight: 700,
-      boxShadow: `0 0 12px ${alter.color}44`, overflow: "hidden",
+      boxShadow: `0 0 12px ${alter.color}55`, overflow: "hidden",
     }}>
       {alter.emoji}
     </div>
@@ -390,6 +390,7 @@ function App() {
   const [editPostImage, setEditPostImage] = useState(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [confirmDeleteAlterId, setConfirmDeleteAlterId] = useState(null);
   const [editingSwitchId, setEditingSwitchId] = useState(null);
   const [switchTsDraft, setSwitchTsDraft] = useState("");
   const [cropSrc, setCropSrc] = useState(null);   // raw image data URL being cropped
@@ -774,14 +775,18 @@ function App() {
 
   function restoreFromTrash(postId) {
     setTrash(prev => {
-      const item = prev.find(t => t.post.id === postId);
+      const item = prev.find(t => t.post && t.post.id === postId);
       if (item) setPosts(p => [item.post, ...p]);
-      return prev.filter(t => t.post.id !== postId);
+      return prev.filter(t => !(t.post && t.post.id === postId));
     });
   }
 
   function deleteFromTrashPermanently(postId) {
-    setTrash(prev => prev.filter(t => t.post.id !== postId));
+    setTrash(prev => prev.filter(t => !(t.post && t.post.id === postId)));
+  }
+
+  function deleteMemberFromTrashPermanently(memberId) {
+    setTrash(prev => prev.filter(t => !(t.type === "member" && t.member.id === memberId)));
   }
 
   function emptyTrash() {
@@ -928,17 +933,41 @@ function App() {
   }
 
   function deleteAlter(alterId, keepPosts) {
+    const target = alters.find(a => a.id === alterId);
     const remaining = alters.filter(a => a.id !== alterId);
     setAlters(remaining);
+    const now = Date.now();
+    if (target) {
+      // Keep the deleted member in trash so it can be restored
+      setTrash(t => [{ type: "member", member: target, deletedAt: now }, ...t]);
+    }
     if (!keepPosts) {
-      setPosts(prev => prev.filter(p => p.alterId !== alterId)
-        .map(p => ({ ...p, replies: (p.replies || []).filter(r => r.alterId !== alterId) })));
+      // Move the member's own posts to trash (whole posts), and strip their replies from others
+      setPosts(prev => {
+        const toTrash = prev.filter(p => p.alterId === alterId);
+        if (toTrash.length > 0) {
+          setTrash(t => [...toTrash.map(p => ({ post: p, deletedAt: now })), ...t]);
+        }
+        return prev.filter(p => p.alterId !== alterId)
+          .map(p => ({ ...p, replies: (p.replies || []).filter(r => r.alterId !== alterId) }));
+      });
     }
     if (activeAlterId === alterId) {
       setActiveAlterId(remaining[0] ? remaining[0].id : null);
     }
     setEditingId(null);
     setEditForm(null);
+    setConfirmDeleteAlterId(null);
+  }
+
+  function restoreMemberFromTrash(memberId) {
+    setTrash(prev => {
+      const item = prev.find(t => t.type === "member" && t.member.id === memberId);
+      if (item) {
+        setAlters(a => a.some(x => x.id === item.member.id) ? a : [...a, item.member]);
+      }
+      return prev.filter(t => !(t.type === "member" && t.member.id === memberId));
+    });
   }
 
   function addAlter() {
@@ -1044,10 +1073,10 @@ function App() {
           ) : (
             <div style={{
               width: 46, height: 46, borderRadius: "50%",
-              background: `radial-gradient(circle at 35% 35%, ${form.color}55, ${form.color}22)`,
+              background: `${form.color}33`,
               border: `2px solid ${form.color}88`,
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 22, boxShadow: `0 0 12px ${form.color}44`,
+              fontSize: 22, boxShadow: `0 0 12px ${form.color}55`,
               color: form.color, fontWeight: 700,
             }}>{form.emoji}</div>
           )}
@@ -1244,9 +1273,9 @@ function App() {
           {renderFormFields(addForm, setAddForm)}
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={addAlter} disabled={!addForm.name.trim()} style={{
-              flex: 1, padding: "11px", borderRadius: 12, border: "none",
-              background: addForm.name.trim() ? "#c4b5fd" : "#00000014",
-              color: addForm.name.trim() ? "#2d2a3a" : "#00000055",
+              flex: 1, padding: "11px", borderRadius: 10, border: "1px solid #00000012",
+              background: "#00000006",
+              color: addForm.name.trim() ? "#00000059" : "#00000033",
               fontWeight: 700, fontSize: 14, cursor: addForm.name.trim() ? "pointer" : "default", fontFamily: "inherit",
             }}>追加</button>
             <button onClick={() => setShowAdd(false)} style={{
@@ -2033,42 +2062,82 @@ function App() {
                 }}>ごみ箱を空にする</button>
               </div>
             )}
-            {trash.map(({ post: tp, deletedAt }) => {
-              const alter = alters.find(a => a.id === tp.alterId) || { name: tp.alterName, color: tp.alterColor, emoji: tp.alterEmoji };
-              const expires = new Date(deletedAt + 24 * 60 * 60 * 1000);
+            {(() => {
+              const memberEntries = trash.filter(e => e.type === "member");
+              const postEntries = trash.filter(e => e.type !== "member");
+              const fmtExpire = (deletedAt) => {
+                const ex = new Date(deletedAt + 24 * 60 * 60 * 1000);
+                return `${ex.getMonth() + 1}月${ex.getDate()}日 ${String(ex.getHours()).padStart(2, "0")}:${String(ex.getMinutes()).padStart(2, "0")} に完全削除`;
+              };
               return (
-                <div key={tp.id} style={{ padding: "12px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
-                  <Avatar alter={alter} size={36} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                      <span style={{ fontWeight: 700, color: alter.color || tp.alterColor, fontSize: 13 }}>{alter.name || tp.alterName}</span>
-                      <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(tp.ts))} {formatTime(tp.ts)}</span>
+                <React.Fragment>
+                  {memberEntries.length > 0 && (
+                    <div style={{ margin: "0 12px 12px", border: "1px solid #00000012", borderRadius: 14, overflow: "hidden" }}>
+                      <div style={{ fontSize: 11, color: "#00000055", padding: "10px 14px 8px", fontWeight: 700 }}>削除されたメンバー</div>
+                      {memberEntries.map((entry, ti) => {
+                        const mem = entry.member;
+                        return (
+                          <div key={`m-${mem.id}-${ti}`} style={{ padding: "12px 14px", borderTop: "1px solid #00000008", display: "flex", gap: 12 }}>
+                            <Avatar alter={mem} size={36} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                                <span style={{ fontWeight: 700, color: mem.color, fontSize: 13 }}>{mem.name}</span>
+                              </div>
+                              {mem.bio && <div style={{ fontSize: 12, color: "#00000066" }}>{mem.bio}</div>}
+                              <div style={{ fontSize: 10, color: "#00000033", marginTop: 6 }}>{fmtExpire(entry.deletedAt)}</div>
+                              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                <button onClick={() => restoreMemberFromTrash(mem.id)} style={{
+                                  fontSize: 12, padding: "5px 14px", borderRadius: 10, border: "1px solid #00000012",
+                                  background: "#00000006", color: "#00000059", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                }}>復元</button>
+                                <button onClick={() => deleteMemberFromTrashPermanently(mem.id)} style={{
+                                  fontSize: 12, padding: "5px 14px", borderRadius: 12, border: "1px solid #00000014",
+                                  background: "transparent", color: "#00000066", cursor: "pointer", fontFamily: "inherit",
+                                }}>完全に削除</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    {tp.isSwitch ? (
-                      <div style={{ fontSize: 13, color: "#00000066" }}>→ {alter.name || tp.alterName} に交代した記録</div>
-                    ) : (
-                      <React.Fragment>
-                        {tp.content && <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{tp.content}</div>}
-                        {tp.image && <img src={tp.image} alt="" style={{ maxWidth: "100%", maxHeight: 160, borderRadius: 10, marginTop: 6, display: "block" }} />}
-                      </React.Fragment>
-                    )}
-                    <div style={{ fontSize: 10, color: "#00000033", marginTop: 6 }}>
-                      {expires.getMonth() + 1}月{expires.getDate()}日 {String(expires.getHours()).padStart(2, "0")}:{String(expires.getMinutes()).padStart(2, "0")} に完全削除
-                    </div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <button onClick={() => restoreFromTrash(tp.id)} style={{
-                        fontSize: 12, padding: "5px 14px", borderRadius: 10, border: "1px solid #00000012",
-                        background: "#00000006", color: "#00000059", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                      }}>復元</button>
-                      <button onClick={() => deleteFromTrashPermanently(tp.id)} style={{
-                        fontSize: 12, padding: "5px 14px", borderRadius: 12, border: "1px solid #00000014",
-                        background: "transparent", color: "#00000066", cursor: "pointer", fontFamily: "inherit",
-                      }}>完全に削除</button>
-                    </div>
-                  </div>
-                </div>
+                  )}
+                  {postEntries.map((entry, ti) => {
+                    const tp = entry.post;
+                    const alter = alters.find(a => a.id === tp.alterId) || { name: tp.alterName, color: tp.alterColor, emoji: tp.alterEmoji };
+                    return (
+                      <div key={`p-${tp.id}-${ti}`} style={{ padding: "12px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
+                        <Avatar alter={alter} size={36} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                            <span style={{ fontWeight: 700, color: alter.color || tp.alterColor, fontSize: 13 }}>{alter.name || tp.alterName}</span>
+                            <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(tp.ts))} {formatTime(tp.ts)}</span>
+                          </div>
+                          {tp.isSwitch ? (
+                            <div style={{ fontSize: 13, color: "#00000066" }}>→ {alter.name || tp.alterName} に交代した記録</div>
+                          ) : (
+                            <React.Fragment>
+                              {tp.content && <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{tp.content}</div>}
+                              {tp.image && <img src={tp.image} alt="" style={{ maxWidth: "100%", maxHeight: 160, borderRadius: 10, marginTop: 6, display: "block" }} />}
+                            </React.Fragment>
+                          )}
+                          <div style={{ fontSize: 10, color: "#00000033", marginTop: 6 }}>{fmtExpire(entry.deletedAt)}</div>
+                          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                            <button onClick={() => restoreFromTrash(tp.id)} style={{
+                              fontSize: 12, padding: "5px 14px", borderRadius: 10, border: "1px solid #00000012",
+                              background: "#00000006", color: "#00000059", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                            }}>復元</button>
+                            <button onClick={() => deleteFromTrashPermanently(tp.id)} style={{
+                              fontSize: 12, padding: "5px 14px", borderRadius: 12, border: "1px solid #00000014",
+                              background: "transparent", color: "#00000066", cursor: "pointer", fontFamily: "inherit",
+                            }}>完全に削除</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
               );
-            })}
+            })()}
           </div>
         )}
 
@@ -2337,15 +2406,19 @@ function App() {
                     )}
                     <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
                       <button onClick={saveEdit} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#e6e6e6", color: "#2d2a3a", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>保存</button>
+                      <button onClick={() => setConfirmDeleteAlterId(prev => prev === a.id ? null : a.id)} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px solid #00000014", background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>削除</button>
                       <button onClick={cancelEdit} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px solid #00000014", background: "transparent", color: "#00000077", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>キャンセル</button>
                     </div>
+                    {confirmDeleteAlterId === a.id && (
                     <div style={{ padding: "12px", borderRadius: 12, background: "#f2f2f2", border: "1px solid #00000010" }}>
                       <div style={{ fontSize: 12, color: "#00000077", marginBottom: 10, lineHeight: 1.6 }}>このメンバーを削除します。投稿をどうしますか？</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <button onClick={() => { if (confirm(`「${a.name}」を削除し、投稿は残します。よろしいですか？`)) deleteAlter(a.id, true); }} style={{ padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: "#2d2a3a", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>削除して投稿は残す</button>
-                        <button onClick={() => { if (confirm(`「${a.name}」と、その投稿・返信をすべて削除します。よろしいですか？`)) deleteAlter(a.id, false); }} style={{ padding: "9px", borderRadius: 10, border: "none", background: "#cfced2", color: "#2d2a3a", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>投稿ごと削除する</button>
+                        <button onClick={() => { deleteAlter(a.id, true); setConfirmDeleteAlterId(null); }} style={{ padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "#ffffff", color: "#2d2a3a", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>削除して投稿は残す</button>
+                        <button onClick={() => { deleteAlter(a.id, false); setConfirmDeleteAlterId(null); }} style={{ padding: "9px", borderRadius: 10, border: "none", background: "#cfced2", color: "#2d2a3a", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>投稿ごとごみ箱へ</button>
+                        <button onClick={() => setConfirmDeleteAlterId(null)} style={{ padding: "9px", borderRadius: 10, border: "1px solid #00000014", background: "transparent", color: "#00000066", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>やめる</button>
                       </div>
                     </div>
+                    )}
                   </div>
                 )}
               </div>
