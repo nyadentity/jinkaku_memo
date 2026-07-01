@@ -23,6 +23,7 @@
   }
   #root { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
   textarea, input { font-family: inherit; }
+  textarea::placeholder, input::placeholder { color: #00000059; }
   .strip::-webkit-scrollbar { display: none; }
 </style>
 </head>
@@ -37,6 +38,7 @@
 const { useState, useEffect, useRef } = React;
 
 const STORAGE_KEY = "jinkaku-sns-v1"; // legacy localStorage key (for migration)
+const DRAFT_KEY = "jinkaku-sns-draft"; // localStorage key for in-progress compose + active member
 const PALETTE = ["#a89ce0","#8fbce8","#7fd1bf","#f3a8b8","#f5cf8f","#f3b0d4","#8fd6de","#b3d98f","#f5c19a","#cfa8e0"];
 const DEFAULT_STATS_ORDER = ["yearly", "monthly", "members", "timeofday", "weekday"];
 
@@ -92,6 +94,7 @@ function normalizeState(data) {
     alters: (data && data.alters) || [],
     posts: (data && data.posts) || [],
     statsOrder,
+    trash: (data && Array.isArray(data.trash)) ? data.trash : [],
   };
 }
 
@@ -362,6 +365,7 @@ function App() {
   const [alters, setAlters] = useState([]);
   const [posts, setPosts] = useState([]);
   const [statsOrder, setStatsOrder] = useState(DEFAULT_STATS_ORDER);
+  const [trash, setTrash] = useState([]); // { post, deletedAt } kept for 1 day
   const [activeAlterId, setActiveAlterId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -417,26 +421,51 @@ function App() {
       setAlters(data.alters);
       setPosts(data.posts);
       setStatsOrder(data.statsOrder);
-      setActiveAlterId(data.alters[0] ? data.alters[0].id : null);
+      // Keep deleted posts for 1 day only
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      setTrash((data.trash || []).filter(t => t.deletedAt >= cutoff));
+      // Restore saved draft + last active member (survives leaving the app)
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch {}
+      const savedActive = saved && saved.activeAlterId && data.alters.some(a => a.id === saved.activeAlterId)
+        ? saved.activeAlterId : (data.alters[0] ? data.alters[0].id : null);
+      setActiveAlterId(savedActive);
+      if (saved) {
+        if (saved.draft) setDraft(saved.draft);
+        if (saved.draftTags) setDraftTags(saved.draftTags);
+        if (saved.draftImage) setDraftImage(saved.draftImage);
+      }
       setLoaded(true);
     }).catch(() => setLoaded(true));
     return () => { cancelled = true; };
   }, []);
 
+  // Persist draft + active member so nothing is lost when leaving the app
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      if (draft || draftTags || draftImage || activeAlterId) {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ activeAlterId, draft, draftTags, draftImage }));
+      } else {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    } catch {}
+  }, [draft, draftTags, draftImage, activeAlterId, loaded]);
+
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(() => {
-      idbSave({ alters, posts, statsOrder }).catch(() => {});
+      idbSave({ alters, posts, statsOrder, trash }).catch(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [alters, posts, statsOrder, loaded]);
+  }, [alters, posts, statsOrder, trash, loaded]);
 
   // Flush latest data immediately when the app is hidden/closed (covers the debounce gap)
   useEffect(() => {
     if (!loaded) return;
     const flush = () => {
       if (document.visibilityState === "hidden") {
-        idbSave({ alters, posts, statsOrder }).catch(() => {});
+        idbSave({ alters, posts, statsOrder, trash }).catch(() => {});
       }
     };
     document.addEventListener("visibilitychange", flush);
@@ -446,6 +475,15 @@ function App() {
       window.removeEventListener("pagehide", flush);
     };
   }, [alters, posts, statsOrder, loaded]);
+
+  // Purge trash items older than 1 day (checked when trash changes)
+  useEffect(() => {
+    if (!loaded) return;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    if (trash.some(t => t.deletedAt < cutoff)) {
+      setTrash(prev => prev.filter(t => t.deletedAt >= cutoff));
+    }
+  }, [trash, loaded]);
 
   if (!loaded) {
     return (
@@ -725,7 +763,29 @@ function App() {
   }
 
   function deletePost(postId) {
-    setPosts(prev => prev.filter(p => p.id !== postId));
+    setPosts(prev => {
+      const target = prev.find(p => p.id === postId);
+      if (target) {
+        setTrash(t => [{ post: target, deletedAt: Date.now() }, ...t]);
+      }
+      return prev.filter(p => p.id !== postId);
+    });
+  }
+
+  function restoreFromTrash(postId) {
+    setTrash(prev => {
+      const item = prev.find(t => t.post.id === postId);
+      if (item) setPosts(p => [item.post, ...p]);
+      return prev.filter(t => t.post.id !== postId);
+    });
+  }
+
+  function deleteFromTrashPermanently(postId) {
+    setTrash(prev => prev.filter(t => t.post.id !== postId));
+  }
+
+  function emptyTrash() {
+    setTrash([]);
   }
 
   function toggleBookmarkPost(postId) {
@@ -891,7 +951,7 @@ function App() {
   }
 
   async function downloadBackup() {
-    const text = JSON.stringify({ alters, posts, statsOrder });
+    const text = JSON.stringify({ alters, posts, statsOrder, trash });
     const now = new Date();
     const pad = n => String(n).padStart(2, "0");
     const filename = `jinkaku-memo-backup-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.json`;
@@ -929,6 +989,7 @@ function App() {
       if (!data || typeof data !== "object") throw new Error("invalid");
       if (Array.isArray(data.alters)) setAlters(data.alters);
       if (Array.isArray(data.posts)) setPosts(data.posts);
+      if (Array.isArray(data.trash)) setTrash(data.trash);
       if (Array.isArray(data.statsOrder)) {
         const restored = data.statsOrder.filter(k => DEFAULT_STATS_ORDER.includes(k));
         DEFAULT_STATS_ORDER.forEach(k => { if (!restored.includes(k)) restored.push(k); });
@@ -954,7 +1015,8 @@ function App() {
     setPosts([]);
     setStatsOrder(DEFAULT_STATS_ORDER);
     setActiveAlterId(null);
-    idbSave({ alters: [], posts: [], statsOrder: DEFAULT_STATS_ORDER }).catch(() => {});
+    setTrash([]);
+    idbSave({ alters: [], posts: [], statsOrder: DEFAULT_STATS_ORDER, trash: [] }).catch(() => {});
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }
 
@@ -1118,7 +1180,7 @@ function App() {
       }}>
         <div onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{ flex: 1, cursor: "pointer" }}>
           <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: "0.05em" }}>
-            {tab === "members" ? "メンバー" : tab === "data" ? "バックアップ/概要" : tab === "search" ? "検索" : tab === "stats" ? "統計" : tab === "bookmarks" ? "ブックマーク" : "人格メモ"}
+            {tab === "members" ? "メンバー" : tab === "data" ? "バックアップ/概要" : tab === "search" ? "検索" : tab === "stats" ? "統計" : tab === "bookmarks" ? "ブックマーク" : tab === "trash" ? "ごみ箱" : "人格メモ"}
           </div>
           <div style={{ fontSize: 11, color: "#00000066" }}>{alters.length}人のメンバー・{allEntries.length}件の投稿</div>
         </div>
@@ -1137,7 +1199,7 @@ function App() {
                 background: "#ffffff", borderRadius: 12, border: "1px solid #00000012",
                 boxShadow: "0 8px 24px #00000022", overflow: "hidden", minWidth: 160,
               }}>
-                {[["timeline", "タイムライン"], ["members", "メンバー"], ["search", "検索"], ["stats", "統計"], ["bookmarks", "ブックマーク"], ["data", "バックアップ/概要"]].map(([k, l]) => (
+                {[["timeline", "タイムライン"], ["members", "メンバー"], ["search", "検索"], ["stats", "統計"], ["bookmarks", "ブックマーク"], ["trash", "ごみ箱"], ["data", "バックアップ/概要"]].map(([k, l]) => (
                   <button key={k} onClick={() => { setTab(k); setMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={{
                     display: "block", width: "100%", textAlign: "left", border: "none",
                     background: tab === k ? "#00000008" : "transparent",
@@ -1370,13 +1432,13 @@ function App() {
                 );
               }
               return (
-                <div key={p.id} style={p.pinned ? {
+                <div key={p.id} style={(p.pinned && editingPostId !== p.id) ? {
                   margin: "8px 12px", padding: "12px 14px", border: "1px solid #e0dee2", borderRadius: 14,
                   display: "flex", gap: 12, background: "transparent",
                 } : { padding: "14px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
                   <Avatar alter={alter} size={40} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {p.pinned && (
+                    {p.pinned && editingPostId !== p.id && (
                       <div style={{ fontSize: 11, color: "#00000055", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#00000055" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M12 17v5" />
@@ -1393,6 +1455,11 @@ function App() {
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 700, color: alter.color || p.alterColor, fontSize: 14 }}>{alter.name || p.alterName}</span>
                         <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(p.ts))} {formatTime(p.ts)}</span>
+                        {p.bookmarked && (
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#00000055" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ alignSelf: "center" }} aria-label="ブックマーク">
+                            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                          </svg>
+                        )}
                       </div>
                       {editingPostId !== p.id && (
                         <div style={{ position: "relative", flexShrink: 0 }}>
@@ -1412,7 +1479,7 @@ function App() {
                                   display: "block", width: "100%", textAlign: "left", border: "none",
                                   background: "transparent", color: "#2d2a3a",
                                   padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
-                                }}>{p.bookmarked ? "ブックマーク解除" : "ブックマーク"}</button>
+                                }}>{p.bookmarked ? "ブックマークを解除" : "ブックマーク"}</button>
                                 <button onClick={() => togglePinPost(p.id)} style={{
                                   display: "block", width: "100%", textAlign: "left", border: "none",
                                   background: "transparent", color: "#2d2a3a",
@@ -1424,6 +1491,13 @@ function App() {
                                     background: "transparent", color: "#2d2a3a",
                                     padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
                                   }}>引用</button>
+                                )}
+                                {!p.isSwitch && (
+                                  <button onClick={() => { setPostMenuOpenId(null); toggleReply(p.id); }} disabled={!activeAlter} style={{
+                                    display: "block", width: "100%", textAlign: "left", border: "none",
+                                    background: "transparent", color: activeAlter ? "#2d2a3a" : "#00000033",
+                                    padding: "10px 14px", fontSize: 13, cursor: activeAlter ? "pointer" : "default", fontFamily: "inherit",
+                                  }}>返信{(p.replies && p.replies.length > 0) ? `（${p.replies.length}）` : ""}</button>
                                 )}
                                 <button onClick={() => startEditPost(p)} style={{
                                   display: "block", width: "100%", textAlign: "left", border: "none",
@@ -1534,15 +1608,6 @@ function App() {
                     )}
 
                     {/* Actions */}
-                    {editingPostId !== p.id && (
-                    <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
-                      <button onClick={() => toggleReply(p.id)} disabled={!activeAlter} style={{
-                        background: "transparent", border: "none", color: activeAlter ? "#00000099" : "#00000033",
-                        cursor: activeAlter ? "pointer" : "default", fontSize: 12, padding: 0,
-                        fontWeight: replyingTo === p.id ? 700 : 400,
-                      }}>返信{(p.replies && p.replies.length > 0) ? ` ${p.replies.length}` : ""}</button>
-                    </div>
-                    )}
 
                     {/* Replies */}
                     {p.replies && p.replies.length > 0 && (
@@ -1577,7 +1642,7 @@ function App() {
                                               display: "block", width: "100%", textAlign: "left", border: "none",
                                               background: "transparent", color: "#2d2a3a",
                                               padding: "10px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit",
-                                            }}>{r.bookmarked ? "ブックマーク解除" : "ブックマーク"}</button>
+                                            }}>{r.bookmarked ? "ブックマークを解除" : "ブックマーク"}</button>
                                             <button onClick={() => startEditReply(p.id, r)} style={{
                                               display: "block", width: "100%", textAlign: "left", border: "none",
                                               background: "transparent", color: "#2d2a3a",
@@ -1949,6 +2014,64 @@ function App() {
           </div>
         )}
 
+        {/* Trash */}
+        {tab === "trash" && (
+          <div style={{ padding: "8px 0" }}>
+            <div style={{ fontSize: 11, color: "#00000055", padding: "4px 16px 12px", lineHeight: 1.6 }}>
+              削除した投稿は1日だけここに保存され、その後は自動的に完全に削除されます。
+            </div>
+            {trash.length === 0 && (
+              <div style={{ textAlign: "center", color: "#00000033", padding: "50px 20px", fontSize: 14 }}>
+                ごみ箱は空です。
+              </div>
+            )}
+            {trash.length > 0 && (
+              <div style={{ textAlign: "right", padding: "0 16px 8px" }}>
+                <button onClick={emptyTrash} style={{
+                  border: "1px solid #00000014", background: "transparent", color: "#00000066",
+                  fontSize: 11, borderRadius: 12, padding: "4px 12px", cursor: "pointer", fontFamily: "inherit",
+                }}>ごみ箱を空にする</button>
+              </div>
+            )}
+            {trash.map(({ post: tp, deletedAt }) => {
+              const alter = alters.find(a => a.id === tp.alterId) || { name: tp.alterName, color: tp.alterColor, emoji: tp.alterEmoji };
+              const expires = new Date(deletedAt + 24 * 60 * 60 * 1000);
+              return (
+                <div key={tp.id} style={{ padding: "12px 16px", borderBottom: "1px solid #00000006", display: "flex", gap: 12 }}>
+                  <Avatar alter={alter} size={36} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                      <span style={{ fontWeight: 700, color: alter.color || tp.alterColor, fontSize: 13 }}>{alter.name || tp.alterName}</span>
+                      <span style={{ fontSize: 11, color: "#00000033" }}>{formatDateLabel(dateKey(tp.ts))} {formatTime(tp.ts)}</span>
+                    </div>
+                    {tp.isSwitch ? (
+                      <div style={{ fontSize: 13, color: "#00000066" }}>→ {alter.name || tp.alterName} に交代した記録</div>
+                    ) : (
+                      <React.Fragment>
+                        {tp.content && <div style={{ fontSize: 13, lineHeight: 1.7, color: "#3a3548", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{tp.content}</div>}
+                        {tp.image && <img src={tp.image} alt="" style={{ maxWidth: "100%", maxHeight: 160, borderRadius: 10, marginTop: 6, display: "block" }} />}
+                      </React.Fragment>
+                    )}
+                    <div style={{ fontSize: 10, color: "#00000033", marginTop: 6 }}>
+                      {expires.getMonth() + 1}月{expires.getDate()}日 {String(expires.getHours()).padStart(2, "0")}:{String(expires.getMinutes()).padStart(2, "0")} に完全削除
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button onClick={() => restoreFromTrash(tp.id)} style={{
+                        fontSize: 12, padding: "5px 14px", borderRadius: 10, border: "1px solid #00000012",
+                        background: "#00000006", color: "#00000059", fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      }}>復元</button>
+                      <button onClick={() => deleteFromTrashPermanently(tp.id)} style={{
+                        fontSize: 12, padding: "5px 14px", borderRadius: 12, border: "1px solid #00000014",
+                        background: "transparent", color: "#00000066", cursor: "pointer", fontFamily: "inherit",
+                      }}>完全に削除</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Stats */}
         {tab === "stats" && (function () {
           const statsSections = {
@@ -2272,8 +2395,8 @@ function App() {
                       cursor: "pointer", fontFamily: "inherit",
                     }}>キャンセル</button>
                     <button onClick={() => { clearAllData(); setConfirmClearAll(false); }} style={{
-                      padding: "8px 16px", borderRadius: 12, border: "none",
-                      background: "#c06060", color: "#ffffff", fontWeight: 700, fontSize: 13,
+                      padding: "8px 16px", borderRadius: 12, border: "1px solid #d8a5a5",
+                      background: "#f3e3e3", color: "#b06b6b", fontWeight: 700, fontSize: 13,
                       cursor: "pointer", fontFamily: "inherit",
                     }}>消去する</button>
                   </div>
