@@ -184,11 +184,10 @@ function PollView({ poll, alters, onVote }) {
 
 function Avatar({ alter, size = 40 }) {
   if (alter.image) {
-    const glow = alter.imageColor || alter.color;
     return (
       <img src={alter.image} alt={alter.name || ""} style={{
         width: size, height: size, borderRadius: "50%", objectFit: "cover",
-        flexShrink: 0, display: "block", boxShadow: `0 0 12px ${glow}55`,
+        flexShrink: 0, display: "block",
       }} />
     );
   }
@@ -199,7 +198,7 @@ function Avatar({ alter, size = 40 }) {
       border: `2px solid ${alter.color}88`,
       display: "flex", alignItems: "center", justifyContent: "center",
       fontSize: size * 0.45, flexShrink: 0, color: `${alter.color}cc`, fontWeight: 700,
-      boxShadow: `0 0 12px ${alter.color}55`, overflow: "hidden",
+      overflow: "hidden",
     }}>
       {alter.emoji}
     </div>
@@ -1068,7 +1067,6 @@ function App() {
           {form.image ? (
             <img src={form.image} alt="" style={{
               width: 46, height: 46, borderRadius: "50%", objectFit: "cover",
-              boxShadow: `0 0 12px ${(form.imageColor || form.color)}66`,
             }} />
           ) : (
             <div style={{
@@ -1076,7 +1074,7 @@ function App() {
               background: `${form.color}33`,
               border: `2px solid ${form.color}88`,
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 22, boxShadow: `0 0 12px ${form.color}55`,
+              fontSize: 22,
               color: form.color, fontWeight: 700,
             }}>{form.emoji}</div>
           )}
