@@ -39,6 +39,8 @@ const { useState, useEffect, useRef } = React;
 
 const STORAGE_KEY = "jinkaku-sns-v1"; // legacy localStorage key (for migration)
 const DRAFT_KEY = "jinkaku-sns-draft"; // localStorage key for in-progress compose + active member
+const LAST_BACKUP_KEY = "jinkaku-sns-last-backup"; // localStorage: timestamp of last file export
+const BACKUP_REMIND_DAYS = 7; // remind to export a backup after this many days
 const PALETTE = ["#a89ce0","#8fbce8","#7fd1bf","#f3a8b8","#f5cf8f","#f3b0d4","#8fd6de","#b3d98f","#f5c19a","#cfa8e0"];
 const DEFAULT_STATS_ORDER = ["yearly", "monthly", "members", "timeofday", "weekday"];
 
@@ -389,6 +391,10 @@ function App() {
   const [editPostImage, setEditPostImage] = useState(null);
   const [postMenuOpenId, setPostMenuOpenId] = useState(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [lastBackupAt, setLastBackupAt] = useState(() => {
+    try { const v = localStorage.getItem(LAST_BACKUP_KEY); return v ? Number(v) : null; } catch { return null; }
+  });
+  const [backupReminderDismissed, setBackupReminderDismissed] = useState(false);
   const [confirmDeleteAlterId, setConfirmDeleteAlterId] = useState(null);
   const [editingSwitchId, setEditingSwitchId] = useState(null);
   const [switchTsDraft, setSwitchTsDraft] = useState("");
@@ -498,6 +504,10 @@ function App() {
 
   const activeAlter = alters.find(a => a.id === activeAlterId) || null;
   const replyAlter = alters.find(a => a.id === replyAlterId) || null;
+
+  // Backup reminder: show when there is data and it's been a while (or never) since a file export.
+  const backupDue = !backupReminderDismissed && posts.length > 0 &&
+    (lastBackupAt == null || (Date.now() - lastBackupAt) > BACKUP_REMIND_DAYS * 24 * 60 * 60 * 1000);
 
   // --- Search / history derived data ---
   // Flatten posts + replies into a single list of entries for search/history
@@ -978,6 +988,13 @@ function App() {
     setShowAdd(false);
   }
 
+  function markBackedUp() {
+    const now = Date.now();
+    setLastBackupAt(now);
+    setBackupReminderDismissed(true);
+    try { localStorage.setItem(LAST_BACKUP_KEY, String(now)); } catch {}
+  }
+
   async function downloadBackup() {
     const text = JSON.stringify({ alters, posts, statsOrder, trash });
     const now = new Date();
@@ -989,6 +1006,7 @@ function App() {
       try {
         const file = new File([text], filename, { type: "application/json" });
         await navigator.share({ files: [file] });
+        markBackedUp();
         return;
       } catch (err) {
         if (err && err.name === "AbortError") return; // user cancelled the share sheet
@@ -1006,6 +1024,7 @@ function App() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      markBackedUp();
     } finally {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
@@ -1262,6 +1281,29 @@ function App() {
           </button>
         ))}
       </div>
+      )}
+
+      {/* Backup reminder */}
+      {backupDue && (
+        <div style={{
+          margin: "10px 12px 0", padding: "10px 12px", borderRadius: 12,
+          background: "#00000006", border: "1px solid #00000012",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <div style={{ flex: 1, fontSize: 12, color: "#00000077", lineHeight: 1.6 }}>
+            {lastBackupAt == null
+              ? "まだバックアップを保存していません。念のためファイルに保存しておくと安心です。"
+              : "しばらくバックアップを保存していません。念のためファイルに保存しておくと安心です。"}
+          </div>
+          <button onClick={downloadBackup} style={{
+            flexShrink: 0, padding: "6px 12px", borderRadius: 10, border: "1px solid #00000012",
+            background: "#00000006", color: "#00000077", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>保存</button>
+          <button onClick={() => setBackupReminderDismissed(true)} aria-label="閉じる" style={{
+            flexShrink: 0, background: "transparent", border: "none", color: "#00000033",
+            fontSize: 16, cursor: "pointer", padding: "0 2px", lineHeight: 1,
+          }}>×</button>
+        </div>
       )}
 
       {/* Add panel (inline, appears when + tapped) */}
@@ -2430,9 +2472,6 @@ function App() {
             <div style={{ fontSize: 13, color: "#00000066", marginBottom: 4, lineHeight: 1.9 }}>
               データはこの端末のブラウザに自動保存されます。念のため、バックアップとしてファイルに保存しておくことができます。機種変更やブラウザのデータ削除に備えると安心です。
             </div>
-            <div style={{ fontSize: 12, color: "#00000077", marginTop: 10, lineHeight: 1.7, background: "#00000006", borderRadius: 10, padding: "10px 12px" }}>
-              新しいバージョンを使う場合は、ホーム画面のアプリを一度削除して追加し直す必要があります。その際、保存されているデータは引き継がれないため、事前に下の「ファイルとして保存」でファイルを保存しておき、新しいバージョンの「ファイルから復元」で読み込んでください。
-            </div>
 
             <div style={{ marginTop: 18, marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>バックアップ</div>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
@@ -2492,6 +2531,13 @@ function App() {
             </div>
 
             <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid #00000010" }}>
+              <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>アプリの更新について</div>
+              <div style={{ fontSize: 12, color: "#00000066", lineHeight: 1.9 }}>
+                新しいバージョンが公開されると、アプリを開いたときに自動で更新されます。反映されないときは、アプリを一度完全に閉じて開き直してください。データはそのまま引き継がれます。
+              </div>
+            </div>
+
+            <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid #00000010" }}>
               <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 700, color: "#2d2a3a" }}>概要</div>
               <div style={{ fontSize: 13, color: "#2d2a3a", lineHeight: 1.9 }}>
                 人格メモは、内部に複数の人格がいる方のためのメモアプリです。
@@ -2516,10 +2562,38 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 
-// Register service worker for PWA / offline
+// Register service worker for PWA / offline, with automatic updates.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js").then(reg => {
+      // Check for a new version whenever the app is opened or refocused.
+      reg.update().catch(() => {});
+      // If a new worker is found and finishes installing, activate it right away.
+      reg.addEventListener("updatefound", () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", () => {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            nw.postMessage("skipWaiting");
+          }
+        });
+      });
+    }).catch(() => {});
+
+    // When the new worker takes control, reload once so the latest UI shows.
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+
+    // Re-check for updates when returning to the app.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+      }
+    });
   });
 }
 </script>
