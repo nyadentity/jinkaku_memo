@@ -39,7 +39,7 @@ const { useState, useEffect, useRef } = React;
 
 const STORAGE_KEY = "jinkaku-sns-v1"; // legacy localStorage key (for migration)
 const DRAFT_KEY = "jinkaku-sns-draft"; // localStorage key for in-progress compose + active member
-const APP_VERSION = "1.1"; // user-facing version, shown under 概要; bump on each update
+const APP_VERSION = "1.2"; // user-facing version, shown under 概要; bump on each update
 const LAST_BACKUP_KEY = "jinkaku-sns-last-backup"; // localStorage: timestamp of last file export
 const BACKUP_REMIND_DAYS = 7; // remind to export a backup after this many days
 const PALETTE = ["#a89ce0","#8fbce8","#7fd1bf","#f3a8b8","#f5cf8f","#f3b0d4","#8fd6de","#b3d98f","#f5c19a","#cfa8e0"];
@@ -1044,6 +1044,7 @@ function App() {
         setStatsOrder(restored);
       }
       if (data.alters && data.alters.length > 0) setActiveAlterId(data.alters[0].id);
+      markBackedUp();
       setImportMessage("復元しました。");
     } catch {
       setImportMessage("読み込みに失敗しました。ファイルの形式を確認してください。");
