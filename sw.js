@@ -1,5 +1,5 @@
 // App shell cache — bump this string to ship an update.
-const CACHE = "jinkaku-sns-v198";
+const CACHE = "jinkaku-sns-v201";
 // Stable cache for the large CDN libraries. Kept across app updates so React /
 // Babel are downloaded only once, not on every version bump.
 const LIB_CACHE = "jinkaku-libs-v1";

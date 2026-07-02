@@ -774,21 +774,19 @@ function App() {
   }
 
   function deletePost(postId) {
-    setPosts(prev => {
-      const target = prev.find(p => p.id === postId);
-      if (target) {
-        setTrash(t => [{ post: target, deletedAt: Date.now() }, ...t]);
-      }
-      return prev.filter(p => p.id !== postId);
-    });
+    const target = posts.find(p => p.id === postId);
+    if (target) {
+      setTrash(t => t.some(x => x.post && x.post.id === postId) ? t : [{ post: target, deletedAt: Date.now() }, ...t]);
+    }
+    setPosts(prev => prev.filter(p => p.id !== postId));
   }
 
   function restoreFromTrash(postId) {
-    setTrash(prev => {
-      const item = prev.find(t => t.post && t.post.id === postId);
-      if (item) setPosts(p => [item.post, ...p]);
-      return prev.filter(t => !(t.post && t.post.id === postId));
-    });
+    const item = trash.find(t => t.post && t.post.id === postId);
+    if (item) {
+      setPosts(p => p.some(x => x.id === postId) ? p : [item.post, ...p]);
+    }
+    setTrash(prev => prev.filter(t => !(t.post && t.post.id === postId)));
   }
 
   function deleteFromTrashPermanently(postId) {
@@ -947,20 +945,21 @@ function App() {
     const remaining = alters.filter(a => a.id !== alterId);
     setAlters(remaining);
     const now = Date.now();
-    if (target) {
-      // Keep the deleted member in trash so it can be restored
-      setTrash(t => [{ type: "member", member: target, deletedAt: now }, ...t]);
-    }
     if (!keepPosts) {
       // Move the member's own posts to trash (whole posts), and strip their replies from others
-      setPosts(prev => {
-        const toTrash = prev.filter(p => p.alterId === alterId);
-        if (toTrash.length > 0) {
-          setTrash(t => [...toTrash.map(p => ({ post: p, deletedAt: now })), ...t]);
-        }
-        return prev.filter(p => p.alterId !== alterId)
-          .map(p => ({ ...p, replies: (p.replies || []).filter(r => r.alterId !== alterId) }));
-      });
+      const toTrash = posts.filter(p => p.alterId === alterId).map(p => ({ post: p, deletedAt: now }));
+      if (target || toTrash.length > 0) {
+        setTrash(t => [
+          ...(target ? [{ type: "member", member: target, deletedAt: now }] : []),
+          ...toTrash,
+          ...t,
+        ]);
+      }
+      setPosts(prev => prev.filter(p => p.alterId !== alterId)
+        .map(p => ({ ...p, replies: (p.replies || []).filter(r => r.alterId !== alterId) })));
+    } else if (target) {
+      // Keep the deleted member in trash so it can be restored
+      setTrash(t => [{ type: "member", member: target, deletedAt: now }, ...t]);
     }
     if (activeAlterId === alterId) {
       setActiveAlterId(remaining[0] ? remaining[0].id : null);
@@ -971,13 +970,11 @@ function App() {
   }
 
   function restoreMemberFromTrash(memberId) {
-    setTrash(prev => {
-      const item = prev.find(t => t.type === "member" && t.member.id === memberId);
-      if (item) {
-        setAlters(a => a.some(x => x.id === item.member.id) ? a : [...a, item.member]);
-      }
-      return prev.filter(t => !(t.type === "member" && t.member.id === memberId));
-    });
+    const item = trash.find(t => t.type === "member" && t.member.id === memberId);
+    if (item) {
+      setAlters(a => a.some(x => x.id === item.member.id) ? a : [...a, item.member]);
+    }
+    setTrash(prev => prev.filter(t => !(t.type === "member" && t.member.id === memberId)));
   }
 
   function addAlter() {
