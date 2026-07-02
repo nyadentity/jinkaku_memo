@@ -1900,26 +1900,38 @@ function App() {
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, color: "#00000066", marginBottom: 8 }}>カレンダーで履歴を見る</div>
               <div style={{ border: "1px solid #00000010", borderRadius: 12, padding: "10px 12px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
                   <button onClick={() => setCalendarMonth(({ y, m }) => m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 })} style={{
-                    border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
+                    background: "#ffffff", border: "1px solid #00000012", borderRadius: 9,
+                    width: 30, height: 30, fontSize: 15, color: "#00000059", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: "inherit",
                   }}>‹</button>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{
+                    flex: 1, textAlign: "center", background: "#ffffff",
+                    border: "1px solid #00000012", borderRadius: 9, padding: "6px 0",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 2,
+                  }}>
                     <select value={calendarMonth.y} onChange={e => setCalendarMonth(c => ({ ...c, y: Number(e.target.value) }))} style={{
-                      fontSize: 13, fontWeight: 400, color: "#2d2a3a", fontFamily: "inherit",
-                      border: "1px solid #00000014", borderRadius: 8, padding: "4px 8px", background: "#ffffff", cursor: "pointer",
+                      border: "none", background: "transparent", fontSize: 12, fontWeight: 600, color: "#00000099",
+                      outline: "none", WebkitAppearance: "none", appearance: "none", textAlign: "center",
+                      textAlignLast: "center", padding: "0 2px", fontFamily: "inherit", cursor: "pointer",
                     }}>
-                      {calendarYears.map(yy => <option key={yy} value={yy}>{yy}年</option>)}
+                      {calendarYears.map(yy => <option key={yy} value={yy}>{yy}</option>)}
                     </select>
+                    <span style={{ fontSize: 12, color: "#00000080" }}>年</span>
                     <select value={calendarMonth.m} onChange={e => setCalendarMonth(c => ({ ...c, m: Number(e.target.value) }))} style={{
-                      fontSize: 13, fontWeight: 400, color: "#2d2a3a", fontFamily: "inherit",
-                      border: "1px solid #00000014", borderRadius: 8, padding: "4px 8px", background: "#ffffff", cursor: "pointer",
+                      border: "none", background: "transparent", fontSize: 12, fontWeight: 600, color: "#00000099",
+                      outline: "none", WebkitAppearance: "none", appearance: "none", textAlign: "center",
+                      textAlignLast: "center", padding: "0 2px", fontFamily: "inherit", cursor: "pointer",
                     }}>
-                      {Array.from({ length: 12 }).map((_, i) => <option key={i} value={i}>{i + 1}月</option>)}
+                      {Array.from({ length: 12 }).map((_, i) => <option key={i} value={i}>{i + 1}</option>)}
                     </select>
+                    <span style={{ fontSize: 12, color: "#00000080" }}>月</span>
                   </div>
                   <button onClick={() => setCalendarMonth(({ y, m }) => m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 })} style={{
-                    border: "none", background: "transparent", fontSize: 16, color: "#00000066", cursor: "pointer", padding: "4px 8px",
+                    background: "#ffffff", border: "1px solid #00000012", borderRadius: 9,
+                    width: 30, height: 30, fontSize: 15, color: "#00000059", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: "inherit",
                   }}>›</button>
                 </div>
                 {(calendarMonth.y !== nowYear || calendarMonth.m !== new Date().getMonth()) && (
